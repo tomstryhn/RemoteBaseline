@@ -2,7 +2,7 @@
 
 .DESCRIPTION Reads the collecting computer's own ComputerId for run.json
 
-.VERSION 1.3.0
+.VERSION 1.4.0
 
 .GUID 7c2e1f0a-3b6d-4b9a-9e8a-2d6f6c1a5b3e
 

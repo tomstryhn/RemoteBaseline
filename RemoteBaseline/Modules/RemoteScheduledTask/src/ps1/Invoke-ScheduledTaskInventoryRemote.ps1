@@ -2,7 +2,7 @@
 
 .DESCRIPTION Runs the worker on one or more remote computers with a single Invoke-Command call
 
-.VERSION 1.3.0
+.VERSION 1.4.1
 
 .GUID eefec445-922a-4863-b556-6ebc034429f0
 
@@ -53,6 +53,11 @@ function Invoke-ScheduledTaskInventoryRemote {
         Forwarded to Invoke-Command as UseSSL when set. Omitted entirely, not passed as
         $false, when the caller does not supply it.
 
+    .PARAMETER SkipSidReference
+        Passed to the worker as its first positional argument, a bool, always: $true with the
+        switch, $false without it. With $true the worker leaves MachineSid, DomainSid,
+        ComputerAccountSid and DomainNetbiosName null and does not read them.
+
     .NOTES
         FUNCTION: Invoke-ScheduledTaskInventoryRemote
         AUTHOR:   Tom Stryhn
@@ -78,7 +83,9 @@ function Invoke-ScheduledTaskInventoryRemote {
         [Parameter(Mandatory = $true)]
         [scriptblock]$OnResult,
 
-        [switch]$UseSSL
+        [switch]$UseSSL,
+
+        [switch]$SkipSidReference
     )
 
     $invokeParams = @{
@@ -88,6 +95,8 @@ function Invoke-ScheduledTaskInventoryRemote {
         ErrorAction   = 'SilentlyContinue'
         ErrorVariable = 'remoteErrors'
     }
+    # Always passed, with or without the switch: the worker's first parameter is positional on the remote call, so the list never varies in length.
+    $invokeParams['ArgumentList'] = @([bool]$SkipSidReference)
     if ($Credential) { $invokeParams['Credential'] = $Credential }
     if ($UseSSL) { $invokeParams['UseSSL'] = $true }
 

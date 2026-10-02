@@ -1,6 +1,6 @@
 @{
     RootModule           = 'RemoteBaseline.psm1'
-    ModuleVersion        = '1.0.0'
+    ModuleVersion        = '1.1.0'
     GUID                 = '709bc392-d3b0-4141-ba62-c4598a7af867'
     Author               = 'Tom Stryhn'
     CompanyName          = 'Tom Stryhn'
@@ -155,7 +155,7 @@
             Tags         = @('PSEdition_Desktop', 'PSEdition_Core', 'Windows', 'Security', 'Baseline', 'Inventory', 'Firewall', 'GroupPolicy', 'RSOP', 'ScheduledTask', 'SecEdit', 'Service', 'WinRM')
             LicenseUri   = 'https://opensource.org/licenses/MIT'
             ProjectUri   = 'https://github.com/tomstryhn/RemoteBaseline'
-            ReleaseNotes = '1.0.0: first release. One function, Get-RemoteBaseline, runs any combination of five bundled collectors (Firewall, RSOP, ScheduledTask, SecEdit, Service) against local and remote computers and arranges their output per host, with run.json, results.csv, a SHA-256 manifest and an optional zip. Bundled collectors, unchanged: RemoteFirewall 1.2.0, RemoteRSOP 1.2.0, RemoteScheduledTask 1.3.0, RemoteSecEdit 1.5.0, RemoteService 1.3.0. Output convention 1.2.'
+            ReleaseNotes = '1.1.0: the SID reference (MachineSid, DomainSid, ComputerAccountSid, DomainNetbiosName) is read once per host and run by the first selected collector, every later collector is called with -SkipSidReference, and host.json carries the four values after MachineGuid; the values appear with RemoteRSOP 1.3.0, RemoteScheduledTask 1.4.1, RemoteSecEdit 1.6.0, RemoteService 1.4.0 and RemoteFirewall 1.3.0, and a bundled collector without the switch is called without it; output convention 1.3 (run.json SchemaVersion 1.3). 1.0.0: first release. One function, Get-RemoteBaseline, runs any combination of five bundled collectors (Firewall, RSOP, ScheduledTask, SecEdit, Service) against local and remote computers and arranges their output per host, with run.json, results.csv, a SHA-256 manifest and an optional zip. Bundled collectors, unchanged: RemoteFirewall 1.2.0, RemoteRSOP 1.2.0, RemoteScheduledTask 1.3.0, RemoteSecEdit 1.5.0, RemoteService 1.3.0. Output convention 1.2.'
         }
     }
 }

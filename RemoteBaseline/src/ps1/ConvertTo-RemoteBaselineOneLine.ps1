@@ -2,7 +2,7 @@
 
 .DESCRIPTION Collapses a message to one trimmed line
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID ccfd5cbe-0bda-45e9-83ca-25343022da0c
 

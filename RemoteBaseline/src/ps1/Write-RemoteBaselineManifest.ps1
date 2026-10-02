@@ -2,7 +2,7 @@
 
 .DESCRIPTION Writes manifest.sha256, the SHA-256 of every file of the run folder
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID dc3a4733-7c1a-45e5-820b-590706911f11
 

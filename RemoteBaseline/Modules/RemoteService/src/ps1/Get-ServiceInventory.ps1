@@ -2,7 +2,7 @@
 
 .DESCRIPTION Collects every Windows service, its account, its security descriptor and its binary identity from local or remote computers
 
-.VERSION 1.3.0
+.VERSION 1.4.0
 
 .GUID ad4b067f-a48b-4edd-ae97-cc8e8f83c0e6
 
@@ -47,6 +47,14 @@ function Get-ServiceInventory {
         module is specific to any domain, server name, or account. It works unchanged on a
         domain-joined computer or on a workgroup computer.
 
+        Each computer's system.json also carries a SID reference of four values: MachineSid, the
+        SID of the computer's own account database (the local account with RID 500, read through
+        CIM, without the RID), and DomainSid, ComputerAccountSid and DomainNetbiosName, read from
+        the computer's own domain account through the same account lookup the module uses for
+        service accounts, only on a domain-joined computer. No Active Directory module and no
+        LDAP is used. A domain controller has no MachineSid, and a workgroup computer has no
+        domain values; those stay null. -SkipSidReference leaves all four null.
+
         Writes <OutputPath>\RemoteService-<yyyyMMdd-HHmmss>Z\ containing run.json, results.csv,
         and one folder per computer that was actually reached. Every failure short of a bad
         -OutputPath or an empty -ComputerName list becomes a result row plus one Write-Warning.
@@ -85,6 +93,13 @@ function Get-ServiceInventory {
 
     .PARAMETER ThrottleLimit
         Passed to Invoke-Command for remote targets. From 1 to 256. Defaults to 32.
+
+    .PARAMETER SkipSidReference
+        Leaves the SID reference unread: MachineSid, DomainSid, ComputerAccountSid and
+        DomainNetbiosName are null in system.json, and run.json records SkipSidReference true.
+        Meant for a caller that runs several collectors against the same computers and needs the
+        reference from one of them only, as RemoteBaseline does. Without the switch every run
+        reads it.
 
     .EXAMPLE
         PS C:\> Get-ServiceInventory -OutputPath C:\ServiceRuns | Format-List
@@ -170,7 +185,9 @@ function Get-ServiceInventory {
         [string]$OutputPath,
 
         [ValidateRange(1, 256)]
-        [int]$ThrottleLimit = 32
+        [int]$ThrottleLimit = 32,
+
+        [switch]$SkipSidReference
     )
 
     begin {
@@ -225,7 +242,7 @@ function Get-ServiceInventory {
             $localWorkerObject = $null
             $localExtraErrors = @()
             try {
-                $localWorkerObject = Invoke-ServiceInventoryLocal
+                $localWorkerObject = Invoke-ServiceInventoryLocal -SkipSidReference:$SkipSidReference
             } catch {
                 $localExtraErrors += $_.Exception.Message
             }
@@ -285,7 +302,7 @@ function Get-ServiceInventory {
             $remoteResult = $null
             $remoteCallError = $null
             try {
-                $remoteResult = Invoke-ServiceInventoryRemote -ComputerName $remoteNames -Credential $Credential -ThrottleLimit $ThrottleLimit -OnResult $onRemoteResult -UseSSL:$UseSSL
+                $remoteResult = Invoke-ServiceInventoryRemote -ComputerName $remoteNames -Credential $Credential -ThrottleLimit $ThrottleLimit -OnResult $onRemoteResult -UseSSL:$UseSSL -SkipSidReference:$SkipSidReference
             } catch {
                 $remoteCallError = $_.Exception.Message
             }
@@ -345,7 +362,7 @@ function Get-ServiceInventory {
             RunId              = Split-Path -Path $runFolder -Leaf
             Collector          = 'RemoteService'
             CollectorVersion   = $MyInvocation.MyCommand.Module.Version.ToString()
-            SchemaVersion      = '1.2'
+            SchemaVersion      = '1.3'
             HostComputer       = $env:COMPUTERNAME
             HostComputerId     = Get-ServiceInventoryHostComputerId
             HostUser           = "$env:USERDOMAIN\$env:USERNAME"
@@ -355,6 +372,7 @@ function Get-ServiceInventory {
             RequestedComputers = @($resolvedNames)
             ThrottleLimit      = $ThrottleLimit
             UseSSL             = [bool]$UseSSL
+            SkipSidReference   = [bool]$SkipSidReference
             Results            = @($rows)
         }
 

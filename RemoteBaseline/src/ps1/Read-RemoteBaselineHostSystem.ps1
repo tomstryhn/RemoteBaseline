@@ -2,7 +2,7 @@
 
 .DESCRIPTION Reads the system.json of the first present collector subfolder of a host folder
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID d1e78657-fdf9-4a1b-a71d-a3d338a9ef25
 

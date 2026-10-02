@@ -2,7 +2,7 @@
 
 .DESCRIPTION Runs the worker in-process on the local computer
 
-.VERSION 1.2.0
+.VERSION 1.3.0
 
 .GUID 19210035-8d07-411b-b9a5-d93435fbb721
 
@@ -26,9 +26,13 @@ function Invoke-RsopInventoryLocal {
 
     .DESCRIPTION
         Kept as its own function, separate from the worker scriptblock, so tests can mock the
-        local call without touching the real RSOP WMI namespaces. Takes no parameters and has no
-        logic of its own beyond the call, which is deliberate: every local alias in the same
+        local call without touching the real RSOP WMI namespaces. Takes only -SkipSidReference and
+        has no logic of its own beyond the call, which is deliberate: every local alias in the same
         Get-RsopInventory call shares this one run instead of each alias triggering its own.
+
+    .PARAMETER SkipSidReference
+        Handed to the worker as a real bool, by name. True leaves MachineSid, DomainSid,
+        ComputerAccountSid and DomainNetbiosName null.
 
     .NOTES
         FUNCTION: Invoke-RsopInventoryLocal
@@ -42,7 +46,9 @@ function Invoke-RsopInventoryLocal {
         System.Management.Automation.PSObject
     #>
 
-    param()
+    param(
+        [switch]$SkipSidReference
+    )
 
-    return & (Get-RsopInventoryWorker)
+    return & (Get-RsopInventoryWorker) -SkipSidReference ([bool]$SkipSidReference)
 }

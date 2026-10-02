@@ -2,7 +2,7 @@
 
 .DESCRIPTION Tests that a path is a direct child of a folder, comparing full resolved paths
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID c41d7e08-93a2-4b6f-8e15-7f0a3d62b9c4
 

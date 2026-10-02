@@ -2,7 +2,7 @@
 
 .DESCRIPTION Returns the self-contained scriptblock that reads the RSOP WMI namespaces on a target
 
-.VERSION 1.2.0
+.VERSION 1.3.0
 
 .GUID 71dfb9d4-6b98-4258-abc0-0f05f1ef5835
 
@@ -27,12 +27,18 @@ function Get-RsopInventoryWorker {
     .DESCRIPTION
         The scriptblock this function returns is what actually runs on the target, local or
         remote, so it uses no module function, no module variable and no using: expression. It
-        takes the computer namespace and the user namespace root, enumerates every populated
+        takes a SkipSidReference flag (first, because the remote call passes it positionally), the
+        computer namespace and the user namespace root, enumerates every populated
         class in root\RSOP\Computer and every root\RSOP\User\<SID> namespace, projects each
         instance into a plain object, resolves every account referenced by a user right or a
         restricted group, and returns one flat object carrying the target identity, the counts,
         the whole dump as one RawJson string and the account table. It never throws: every step
-        sits in its own try/catch and appends to an Errors list instead. Invoke-RsopInventoryLocal
+        sits in its own try/catch and appends to an Errors list instead. The identity step also
+        reads the SID reference: MachineSid from the local account with RID 500 (Win32_UserAccount
+        filtered on the computer name as the domain, so a domain controller gives null), and on a
+        domain-joined computer DomainSid, ComputerAccountSid and DomainNetbiosName from a
+        translation of the computer's own domain account. SkipSidReference true leaves all four
+        null with no error. Invoke-RsopInventoryLocal
         calls it directly for the local computer. Invoke-RsopInventoryRemote passes it to
         Invoke-Command for every remote target.
 
@@ -52,6 +58,7 @@ function Get-RsopInventoryWorker {
 
     return {
         param(
+            [bool]$SkipSidReference = $false,
             [string]$ComputerNamespace = 'root\RSOP\Computer',
             [string]$UserNamespaceRoot = 'root\RSOP\User'
         )
@@ -293,6 +300,51 @@ function Get-RsopInventoryWorker {
             $machineGuid = [string](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name MachineGuid -ErrorAction Stop).MachineGuid
         }
         catch { $errors += "identity: MachineGuid: $($_.Exception.Message)" }
+        #endregion
+
+        #region SID reference
+        # Four reference values that say whose an S-1-5-21 SID is; none is used as identity. MachineSid is the SID of the computer's own account database: the built-in Administrator (RID 500, whatever its name or state) without the RID. The filter names the computer as the domain, so only the local accounts are read; a domain controller has no such row and keeps null with no error. The domain values come from the computer's own account and are read only on a domain-joined computer. -SkipSidReference leaves all four null with no error.
+        $machineSid = $null
+        $domainSid = $null
+        $computerAccountSid = $null
+        $domainNetbiosName = $null
+        if (-not $SkipSidReference) {
+            try {
+                $localAccounts = @(Get-CimInstance -ClassName Win32_UserAccount -Filter ('Domain = "{0}"' -f $env:COMPUTERNAME) -ErrorAction Stop -Verbose:$false)
+                foreach ($localAccount in $localAccounts) {
+                    if ([string]$localAccount.SID -match '^(S-1-5-21-\d+-\d+-\d+)-500$') {
+                        $machineSid = $matches[1]
+                        break
+                    }
+                }
+            }
+            catch { $errors += "identity: MachineSid: $($_.Exception.Message)" }
+
+            if ($partOfDomain) {
+                $computerAccountSidObject = $null
+                try {
+                    $computerAccount = New-Object System.Security.Principal.NTAccount(($domain + '\' + $env:COMPUTERNAME + '$'))
+                    $computerAccountSidObject = $computerAccount.Translate([System.Security.Principal.SecurityIdentifier])
+                    $computerAccountSid = $computerAccountSidObject.Value
+                    $domainSid = $computerAccountSidObject.AccountDomainSid.Value
+                }
+                catch {
+                    $computerAccountSidObject = $null
+                    $computerAccountSid = $null
+                    $domainSid = $null
+                    $errors += "identity: DomainSid: $($_.Exception.GetBaseException().Message)"
+                }
+
+                if ($null -ne $computerAccountSidObject) {
+                    try {
+                        $computerAccountName = $computerAccountSidObject.Translate([System.Security.Principal.NTAccount]).Value
+                        $separatorIndex = $computerAccountName.IndexOf('\')
+                        if ($separatorIndex -gt 0) { $domainNetbiosName = $computerAccountName.Substring(0, $separatorIndex) }
+                    }
+                    catch { $errors += "identity: DomainNetbiosName: $($_.Exception.GetBaseException().Message)" }
+                }
+            }
+        }
         #endregion
 
         $identityStopwatch.Stop()
@@ -553,6 +605,10 @@ function Get-RsopInventoryWorker {
             CollectedUtc           = $collectedUtc
             ComputerId             = $computerId
             MachineGuid            = $machineGuid
+            MachineSid             = $machineSid
+            DomainSid              = $domainSid
+            ComputerAccountSid     = $computerAccountSid
+            DomainNetbiosName      = $domainNetbiosName
             ComputerNamespace      = $ComputerNamespace
             UserNamespaceRoot      = $UserNamespaceRoot
             ComputerClassCount     = $computerClassCount

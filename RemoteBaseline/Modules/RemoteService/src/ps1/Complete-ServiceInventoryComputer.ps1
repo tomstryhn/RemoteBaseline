@@ -2,7 +2,7 @@
 
 .DESCRIPTION Turns one worker object into a result row, and writes its per-computer folder
 
-.VERSION 1.3.0
+.VERSION 1.4.0
 
 .GUID 9ad44ca9-108b-4409-9555-ef194217103d
 
@@ -208,7 +208,8 @@ function Complete-ServiceInventoryComputer {
             $systemObject = [ordered]@{}
             $identityPropertyOrder = @('ComputerName', 'DnsHostName', 'Domain', 'OSCaption', 'OSVersion', 'CurrentBuild', 'UBR',
                 'DisplayVersion', 'EditionID', 'InstallationType', 'Culture', 'TimeZoneId', 'PSVersion', 'CollectedBy',
-                'PartOfDomain', 'IsElevated', 'DomainRole', 'CollectedUtc', 'ComputerId', 'MachineGuid')
+                'PartOfDomain', 'IsElevated', 'DomainRole', 'CollectedUtc', 'ComputerId', 'MachineGuid',
+                'MachineSid', 'DomainSid', 'ComputerAccountSid', 'DomainNetbiosName')
             foreach ($name in $identityPropertyOrder) {
                 $systemObject[$name] = Get-ServiceInventorySafeProperty -InputObject $WorkerObject -Name $name -Default $null
             }

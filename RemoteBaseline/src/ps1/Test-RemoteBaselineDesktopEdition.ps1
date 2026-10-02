@@ -2,7 +2,7 @@
 
 .DESCRIPTION Tells whether the session is Windows PowerShell (Desktop edition), which limits a path to 260 characters
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID 8d2c6f41-3b97-4e5a-a0d8-6c19e4b7f352
 

@@ -2,7 +2,7 @@
 
 .DESCRIPTION Writes text to a file as UTF-8 without a byte order mark
 
-.VERSION 1.2.0
+.VERSION 1.3.0
 
 .GUID cea497c7-0c5f-4735-8253-6c9cfb5d9e7d
 

@@ -2,7 +2,7 @@
 
 .DESCRIPTION Runs the bundled Remote collectors against local or remote computers and arranges the output per host
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID 328237d5-01c6-4bcd-aa0b-731e41f30259
 
@@ -33,6 +33,15 @@ function Get-RemoteBaseline {
         whole list of computers, in the fixed order Firewall, RSOP, ScheduledTask, SecEdit,
         Service, with the parameters of this call, and keeps its own WinRM fan-out. Targets are
         only read, never changed; this module adds no action on a target.
+
+        The SID reference (MachineSid, DomainSid, ComputerAccountSid and DomainNetbiosName, output
+        convention 1.3) is read once per host and run: the first selected collector in run order
+        reads it, and every later one is called with -SkipSidReference, so its system.json holds
+        null for the four values. host.json is the place to read them in a bundle run; a host the
+        first selected collector did not reach has null there. A bundled collector without the
+        switch is called without it. For the values to appear the bundle needs RemoteRSOP 1.3.0,
+        RemoteScheduledTask 1.4.1, RemoteSecEdit 1.6.0, RemoteService 1.4.0 and RemoteFirewall
+        1.3.0.
 
         Writes <OutputPath>\RemoteBaseline-<yyyyMMdd-HHmmss>Z\ (a _2, _3 suffix on collision)
         containing run.json, results.csv, manifest.sha256, a collectors folder with the run.json
@@ -222,6 +231,7 @@ function Get-RemoteBaseline {
 
                 # Step 3: every selected collector, in run order, one call each for the whole list.
                 $collectorResults = [System.Collections.Generic.List[object]]::new()
+                $firstCollector = $true
                 foreach ($collector in $selectedCollectors) {
                     $callParams = @{
                         Type          = $collector.Type
@@ -231,6 +241,9 @@ function Get-RemoteBaseline {
                     }
                     if ($null -ne $Credential) { $callParams['Credential'] = $Credential }
                     if ($UseSSL) { $callParams['UseSSL'] = $true }
+                    # The SID reference is read once per host and run: the first collector in run order reads it, every later one is told to skip it.
+                    if (-not $firstCollector) { $callParams['SkipSidReference'] = $true }
+                    $firstCollector = $false
                     Write-Verbose "Collecting $($collector.Type) with $($collector.Module)."
                     [void]$collectorResults.Add((Invoke-RemoteBaselineCollector @callParams))
                 }
@@ -350,7 +363,7 @@ function Get-RemoteBaseline {
                         RunId              = $runId
                         Collector          = 'RemoteBaseline'
                         CollectorVersion   = $collectorVersion
-                        SchemaVersion      = '1.2'
+                        SchemaVersion      = '1.3'
                         HostComputer       = $hostIdentity.HostComputer
                         HostComputerId     = $hostIdentity.HostComputerId
                         HostUser           = $hostIdentity.HostUser

@@ -2,7 +2,7 @@
 
 .DESCRIPTION Returns the self-contained scriptblock that collects the service inventory on a target
 
-.VERSION 1.3.0
+.VERSION 1.4.0
 
 .GUID a5357d75-4038-4214-8138-e8d692726de0
 
@@ -27,14 +27,25 @@ function Get-ServiceInventoryWorker {
     .DESCRIPTION
         The scriptblock this function returns is what actually runs on the target, local or
         remote, so it uses no module function, no module variable and no using: expression. It
-        takes -ScPath and depends on nothing else from the caller's session. It reads every
-        Win32_Service instance, the security descriptor of every service, the SID of every
-        distinct account a service runs as, and the identity and signature of every distinct
-        service binary, and returns one flat object describing the target and all four. It never
+        takes -SkipSidReference and -ScPath and depends on nothing else from the caller's
+        session. It reads every Win32_Service instance, the security descriptor of every
+        service, the SID of every distinct account a service runs as, and the identity and
+        signature of every distinct service binary, and returns one flat object describing the
+        target and all four. It also reads four SID reference values: MachineSid from the local
+        account with RID 500 (Win32_UserAccount filtered to the computer's own name, so a domain
+        controller has none and keeps null), and, on a domain-joined computer only, DomainSid,
+        ComputerAccountSid and DomainNetbiosName from the computer's own domain account through
+        an account lookup. No Active Directory module and no LDAP is used. It never
         throws: every step is wrapped in its own try/catch and appends to an Errors list instead.
         It writes nothing to the target's disk.
         Invoke-ServiceInventoryLocal calls it directly for the local computer.
         Invoke-ServiceInventoryRemote passes it to Invoke-Command for every remote target.
+
+    .PARAMETER SkipSidReference
+        A parameter of the returned scriptblock, not of this function. It is the first parameter
+        because the remote call passes it positionally. When true, none of the SID reference
+        reads runs: the four values are null with no error. Defaults to false, for tests only;
+        every real caller passes it.
 
     .NOTES
         FUNCTION: Get-ServiceInventoryWorker
@@ -52,6 +63,8 @@ function Get-ServiceInventoryWorker {
 
     return {
         param(
+            [bool]$SkipSidReference = $false,
+
             [string]$ScPath = (Join-Path -Path ([Environment]::GetFolderPath('System')) -ChildPath 'sc.exe')
         )
 
@@ -188,6 +201,51 @@ function Get-ServiceInventoryWorker {
             $machineGuid = [string](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name MachineGuid -ErrorAction Stop).MachineGuid
         }
         catch { $errors += "identity: MachineGuid: $($_.Exception.Message)" }
+        #endregion
+
+        #region SID reference
+        # Four reference values that say whose an S-1-5-21 SID is; none is used as identity. MachineSid is the SID of the computer's own account database: the built-in Administrator (RID 500, whatever its name or state) without the RID. The filter names the computer as the domain, so only the local accounts are read; a domain controller has no such row and keeps null with no error. The domain values come from the computer's own account and are read only on a domain-joined computer. -SkipSidReference leaves all four null with no error.
+        $machineSid = $null
+        $domainSid = $null
+        $computerAccountSid = $null
+        $domainNetbiosName = $null
+        if (-not $SkipSidReference) {
+            try {
+                $localAccounts = @(Get-CimInstance -ClassName Win32_UserAccount -Filter ('Domain = "{0}"' -f $env:COMPUTERNAME) -ErrorAction Stop -Verbose:$false)
+                foreach ($localAccount in $localAccounts) {
+                    if ([string]$localAccount.SID -match '^(S-1-5-21-\d+-\d+-\d+)-500$') {
+                        $machineSid = $matches[1]
+                        break
+                    }
+                }
+            }
+            catch { $errors += "identity: MachineSid: $($_.Exception.Message)" }
+
+            if ($partOfDomain) {
+                $computerAccountSidObject = $null
+                try {
+                    $computerAccount = New-Object System.Security.Principal.NTAccount(($domain + '\' + $env:COMPUTERNAME + '$'))
+                    $computerAccountSidObject = $computerAccount.Translate([System.Security.Principal.SecurityIdentifier])
+                    $computerAccountSid = $computerAccountSidObject.Value
+                    $domainSid = $computerAccountSidObject.AccountDomainSid.Value
+                }
+                catch {
+                    $computerAccountSidObject = $null
+                    $computerAccountSid = $null
+                    $domainSid = $null
+                    $errors += "identity: DomainSid: $($_.Exception.GetBaseException().Message)"
+                }
+
+                if ($null -ne $computerAccountSidObject) {
+                    try {
+                        $computerAccountName = $computerAccountSidObject.Translate([System.Security.Principal.NTAccount]).Value
+                        $separatorIndex = $computerAccountName.IndexOf('\')
+                        if ($separatorIndex -gt 0) { $domainNetbiosName = $computerAccountName.Substring(0, $separatorIndex) }
+                    }
+                    catch { $errors += "identity: DomainNetbiosName: $($_.Exception.GetBaseException().Message)" }
+                }
+            }
+        }
         #endregion
 
         #region Services
@@ -554,6 +612,10 @@ function Get-ServiceInventoryWorker {
             CollectedUtc        = $collectedUtc
             ComputerId          = $computerId
             MachineGuid         = $machineGuid
+            MachineSid          = $machineSid
+            DomainSid           = $domainSid
+            ComputerAccountSid  = $computerAccountSid
+            DomainNetbiosName   = $domainNetbiosName
             ScPath              = $ScPath
             ServiceCount        = [int]$serviceCount
             SddlFailedCount     = [int]$sddlFailedCount

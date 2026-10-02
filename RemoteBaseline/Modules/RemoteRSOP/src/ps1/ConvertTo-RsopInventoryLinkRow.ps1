@@ -2,7 +2,7 @@
 
 .DESCRIPTION Turns one RSOP_GPLink instance into one link object
 
-.VERSION 1.2.0
+.VERSION 1.3.0
 
 .GUID c7ed5347-eb30-426f-a87d-79279aefa3ae
 

@@ -2,7 +2,7 @@
 
 .DESCRIPTION Returns the collecting computer's own ComputerId, read the same way the worker reads a target's
 
-.VERSION 1.3.0
+.VERSION 1.4.1
 
 .GUID 2acecfeb-f22f-479c-824f-404dcdb7e895
 

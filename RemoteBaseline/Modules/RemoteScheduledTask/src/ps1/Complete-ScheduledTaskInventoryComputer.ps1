@@ -2,7 +2,7 @@
 
 .DESCRIPTION Turns one worker object into a result row, and writes its per-computer folder
 
-.VERSION 1.3.0
+.VERSION 1.4.1
 
 .GUID 362850eb-3c37-4ded-9c5e-eb0f8b97921a
 
@@ -36,7 +36,12 @@ function Complete-ScheduledTaskInventoryComputer {
         write failure) is appended, so a problem the host has while writing the remaining files
         never changes a Status the target-side collection already earned. A count the worker
         object does not carry is not the same as a verified zero, so it is never turned into one:
-        Success cannot be reached when the worker's own XmlFailedCount is $null.
+        Success cannot be reached when the worker's own XmlFailedCount is $null. The one count
+        that is allowed to be absent is BinaryMissingExpectedCount, the missing binaries the
+        worker named as known-absent Windows binaries (failover.exe and MusNotification.exe in
+        System32, named only by tasks under \Microsoft\Windows\UpdateOrchestrator\): it is
+        subtracted from BinaryMissingCount for the Status gate, and absent it counts as 0. It is
+        read for that gate only and is written to no file.
 
     .PARAMETER RequestedComputerName
         The name as the caller requested it, used for the result row and any error messages.
@@ -111,6 +116,9 @@ function Complete-ScheduledTaskInventoryComputer {
         $sddlFailedCount = Get-ScheduledTaskInventorySafeProperty -InputObject $WorkerObject -Name 'SddlFailedCount' -Default $null
         $binaryCount = Get-ScheduledTaskInventorySafeProperty -InputObject $WorkerObject -Name 'BinaryCount' -Default $null
         $binaryMissingCount = Get-ScheduledTaskInventorySafeProperty -InputObject $WorkerObject -Name 'BinaryMissingCount' -Default $null
+        # Missing binaries the worker named as known-absent Windows binaries (1.4.1). Read for the Status gate only and written to no file. An older worker object has no such property, which counts as 0 expected, so it gates as before.
+        $binaryMissingExpectedCount = Get-ScheduledTaskInventorySafeProperty -InputObject $WorkerObject -Name 'BinaryMissingExpectedCount' -Default $null
+        if ($null -eq $binaryMissingExpectedCount) { $binaryMissingExpectedCount = 0 }
         $accountCount = Get-ScheduledTaskInventorySafeProperty -InputObject $WorkerObject -Name 'AccountCount' -Default $null
         $accountUnresolvedCount = Get-ScheduledTaskInventorySafeProperty -InputObject $WorkerObject -Name 'AccountUnresolvedCount' -Default $null
 
@@ -136,7 +144,7 @@ function Complete-ScheduledTaskInventoryComputer {
         # Status is computed from the worker object's own counts and its own Errors list alone, never from anything the host has trouble with while writing the per-computer files. A $null count (a malformed or partial worker object) is not the same as a verified 0, so Success also requires every count to be present.
         if (($null -eq $taskCount) -or ([int]$taskCount -eq 0)) {
             $status = 'Failed'
-        } elseif (($null -ne $workerXmlFailedCount) -and ($null -ne $sddlFailedCount) -and ($null -ne $binaryMissingCount) -and ([int]$workerXmlFailedCount -eq 0) -and ([int]$sddlFailedCount -eq 0) -and ([int]$binaryMissingCount -eq 0) -and ($workerErrors.Count -eq 0)) {
+        } elseif (($null -ne $workerXmlFailedCount) -and ($null -ne $sddlFailedCount) -and ($null -ne $binaryMissingCount) -and ([int]$workerXmlFailedCount -eq 0) -and ([int]$sddlFailedCount -eq 0) -and (([int]$binaryMissingCount - [int]$binaryMissingExpectedCount) -le 0) -and ($workerErrors.Count -eq 0)) {
             $status = 'Success'
         } else {
             $status = 'Partial'
@@ -223,7 +231,8 @@ function Complete-ScheduledTaskInventoryComputer {
             $systemObject = [ordered]@{}
             $identityPropertyOrder = @('ComputerName', 'DnsHostName', 'Domain', 'OSCaption', 'OSVersion', 'CurrentBuild', 'UBR',
                 'DisplayVersion', 'EditionID', 'InstallationType', 'Culture', 'TimeZoneId', 'PSVersion', 'CollectedBy',
-                'PartOfDomain', 'IsElevated', 'DomainRole', 'CollectedUtc', 'ComputerId', 'MachineGuid')
+                'PartOfDomain', 'IsElevated', 'DomainRole', 'CollectedUtc', 'ComputerId', 'MachineGuid',
+                'MachineSid', 'DomainSid', 'ComputerAccountSid', 'DomainNetbiosName')
             foreach ($name in $identityPropertyOrder) {
                 $systemObject[$name] = Get-ScheduledTaskInventorySafeProperty -InputObject $WorkerObject -Name $name -Default $null
             }

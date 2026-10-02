@@ -2,7 +2,7 @@
 
 .DESCRIPTION Turns one setting object into its csv-shaped equivalent
 
-.VERSION 1.2.0
+.VERSION 1.3.0
 
 .GUID 071c416e-4b8b-4915-924f-dec198f24931
 

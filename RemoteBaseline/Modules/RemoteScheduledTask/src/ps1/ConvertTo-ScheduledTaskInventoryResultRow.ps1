@@ -2,7 +2,7 @@
 
 .DESCRIPTION Builds one RemoteScheduledTask.Result row
 
-.VERSION 1.3.0
+.VERSION 1.4.1
 
 .GUID 2c70669b-4e66-438e-9ec6-b7131e68cc64
 

@@ -2,7 +2,7 @@
 
 .DESCRIPTION Collects every scheduled task with the fields of its definition, its account and its SID, its security descriptor, its run-time state and its action binary identity from local or remote computers
 
-.VERSION 1.3.0
+.VERSION 1.4.1
 
 .GUID 40533d97-35b1-4617-99ce-9b78add027f4
 
@@ -60,6 +60,30 @@ function Get-ScheduledTaskInventory {
         module runs in FullLanguage mode only, so a target in ConstrainedLanguage mode comes back
         Failed; the README's Known limits paragraph says why.
 
+        Also reads four SID reference values on each target and writes them to system.json:
+        MachineSid (the SID of the computer's own account database, no RID), and on a
+        domain-joined computer DomainSid, ComputerAccountSid and DomainNetbiosName. MachineSid
+        is read from the local account with RID 500 through CIM (Win32_UserAccount filtered on
+        the computer's own name). The domain values are read from the computer's own domain
+        account through the same account lookup the module uses for task accounts, only on a
+        domain-joined computer. No Active Directory module and no LDAP is used.
+        Win32_UserAccount lists no local account on a domain controller, so MachineSid is null
+        there, and a workgroup computer has no domain values: they stay null.
+        -SkipSidReference leaves all four unread.
+
+        A missing binary is data, not an error, in one case. Windows ships two scheduled tasks
+        whose program is not on the disk: \Microsoft\Windows\UpdateOrchestrator\UUS Failover Task
+        on Server 2022 (%SystemRoot%\System32\failover.exe) and
+        \Microsoft\Windows\UpdateOrchestrator\USO_UxBroker on Server 2025 and Windows 11
+        (%SystemRoot%\System32\MusNotification.exe). When a missing binary is one of those two
+        files in the target's own System32 and every task that names it sits under
+        \Microsoft\Windows\UpdateOrchestrator\, it still counts in BinaryMissingCount and shows in
+        binaries.json, binaries.csv and summary.json, but the worker adds no error line for it,
+        so it does not turn the row Partial, and this function writes one warning per path:
+        "<ComputerName>: binary <path>: not found (Windows ships no such file; not counted as an
+        error)". The same file named by a task anywhere else, and any other missing or unreadable
+        binary, is still an error line and gives Partial.
+
         Writes <OutputPath>\RemoteScheduledTask-<yyyyMMdd-HHmmss>Z\ containing run.json,
         results.csv, and one folder per computer that was actually reached. Every failure short of
         a bad -OutputPath or an empty -ComputerName list becomes a result row plus one
@@ -98,6 +122,13 @@ function Get-ScheduledTaskInventory {
 
     .PARAMETER ThrottleLimit
         Passed to Invoke-Command for remote targets. From 1 to 256. Defaults to 32.
+
+    .PARAMETER SkipSidReference
+        Leaves the SID reference unread: MachineSid, DomainSid, ComputerAccountSid and
+        DomainNetbiosName are null in system.json, and run.json records SkipSidReference true.
+        Meant for a caller that runs several collectors against the same computers and needs the
+        reference from one of them only, as RemoteBaseline does. Without the switch every run
+        reads it.
 
     .EXAMPLE
         PS C:\> Import-Module .\RemoteScheduledTask\RemoteScheduledTask.psd1 -Force
@@ -147,37 +178,41 @@ function Get-ScheduledTaskInventory {
 
     .EXAMPLE
         PS C:\TaskTest> '.', 'localhost', 'SRV020', 'DC01', 'dc01.contoso.com', 'DC02', 'SRV050', 'WS01', 'NOSUCHHOST01' | Get-ScheduledTaskInventory -OutputPath 'out[1]' | Format-Table ComputerName, ComputerId, Status, Transport, IsElevated, TaskCount, XmlFailedCount, SddlFailedCount, BinaryCount, BinaryMissingCount, AccountCount, AccountUnresolvedCount, ErrorCount, Error -AutoSize
+        WARNING: NOSUCHHOST01: Connecting to remote server NOSUCHHOST01 failed with the following error message : WinRM cannot process the request. The following error occurred while using Kerberos authentication: Cannot find the computer NOSUCHHOST01. Verify that the computer exists on the network and that the name provided is spelled correctly. For more information, see the about_Remote_Troubleshooting Help topic.
+        WARNING: DC01: binary C:\Windows\system32\failover.exe: not found (Windows ships no such file; not counted as an error)
+        WARNING: dc01.contoso.com: binary C:\Windows\system32\failover.exe: not found (Windows ships no such file; not counted as an error)
+        WARNING: DC02: binary C:\Windows\system32\MusNotification.exe: not found (Windows ships no such file; not counted as an error)
+        WARNING: SRV050: binary C:\Windows\system32\MusNotification.exe: not found (Windows ships no such file; not counted as an error)
+        WARNING: WS01: binary C:\WINDOWS\system32\MusNotification.exe: not found (Windows ships no such file; not counted as an error)
 
         ComputerName        ComputerId                           Status  Transport IsElevated TaskCount XmlFailedCount SddlFailedCount BinaryCount BinaryMissingCount AccountCount AccountUnresolvedCount ErrorCount Error
         ------------        ----------                           ------  --------- ---------- --------- -------------- --------------- ----------- ------------------ ------------ ---------------------- ---------- -----
         .                   11111111-2222-3333-4444-555555555503 Success Local           True       128              0               0          37                  0            9                      0          0
         localhost           11111111-2222-3333-4444-555555555503 Success Local           True       128              0               0          37                  0            9                      0          0
         SRV020              11111111-2222-3333-4444-555555555503 Success Local           True       128              0               0          37                  0            9                      0          0
-        WARNING: DC01: binary C:\Windows\system32\failover.exe: not found
-        DC01                11111111-2222-3333-4444-555555555504 Partial WinRM           True       157              0               0          41                  1            9                      0          1 binary C:\Windows\system32\failover.exe: not found
-        WARNING: dc01.contoso.com: binary C:\Windows\system32\failover.exe: not found
-        dc01.contoso.com    11111111-2222-3333-4444-555555555504 Partial WinRM           True       157              0               0          41                  1            9                      0          1 binary C:\Windows\system32\failover.exe: not found
-        WARNING: DC02: binary C:\Windows\system32\MusNotification.exe: not found
-        DC02                11111111-2222-3333-4444-555555555505 Partial WinRM           True       202              0               0          45                  1            9                      0          1 binary C:\Windows\system32\MusNotification.exe: not found
-        WARNING: SRV050: binary C:\Windows\system32\MusNotification.exe: not found
-        SRV050              11111111-2222-3333-4444-555555555506 Partial WinRM           True       202              0               0          45                  1            9                      0          1 binary C:\Windows\system32\MusNotification.exe: not found
-        WARNING: WS01: binary C:\WINDOWS\system32\MusNotification.exe: not found
-        WS01                11111111-2222-3333-4444-555555555507 Partial WinRM           True       255              0               0          58                  1           10                      0          1 binary C:\WINDOWS\system32\MusNotification.exe: not found
-        WARNING: NOSUCHHOST01: Connecting to remote server NOSUCHHOST01 failed with the following error message : WinRM cannot process the request. The following error occurred while using Kerberos authentication: Cannot find the computer NOSUCHHOST01. Verify that the computer exists on the network and that the name provided is spelled correctly. For more information, see the about_Remote_Troubleshooting Help topic.
+        DC01                11111111-2222-3333-4444-555555555504 Success WinRM           True       157              0               0          41                  1            9                      0          0
+        dc01.contoso.com    11111111-2222-3333-4444-555555555504 Success WinRM           True       157              0               0          41                  1            9                      0          0
+        DC02                11111111-2222-3333-4444-555555555505 Success WinRM           True       202              0               0          45                  1            9                      0          0
+        SRV050              11111111-2222-3333-4444-555555555506 Success WinRM           True       202              0               0          45                  1            9                      0          0
+        WS01                11111111-2222-3333-4444-555555555507 Success WinRM           True       255              0               0          58                  1           10                      0          0
         NOSUCHHOST01                                             Failed  WinRM                                                                                                                                     1 Connecting to remote server NOSUCHHOST01 failed with the following error message : WinRM can...
 
         Nine names in one call on SRV020, a Windows Server 2016 domain member elevated as a domain
         administrator: DC01 and dc01.contoso.com are the same computer requested twice giving two
-        folders, WS01, DC02 and SRV050 each report Partial for one inbox task pointing at a binary
-        missing from disk, and NOSUCHHOST01 is unreachable and comes back Failed.
+        folders, DC01, DC02, SRV050 and WS01 each hold one inbox task pointing at a binary Windows
+        does not ship, so they report Success with BinaryMissingCount 1 and one warning per row,
+        and NOSUCHHOST01 is unreachable and comes back Failed. The function writes the warning of
+        a row that is not Success before that row, and every known-absent warning after the last
+        row; Format-Table buffers the table, so the console prints all the warnings above it, in
+        the order they were written.
 
     .EXAMPLE
         PS C:\UseSSLTest> Get-ScheduledTaskInventory -ComputerName 'SRV099.contoso.com' -UseSSL -OutputPath 'out' | Format-Table -Property ComputerName, ComputerId, Status, Transport, TaskCount, ErrorCount
-        WARNING: SRV099.contoso.com: binary C:\Windows\system32\failover.exe: not found
+        WARNING: SRV099.contoso.com: binary C:\Windows\system32\failover.exe: not found (Windows ships no such file; not counted as an error)
 
         ComputerName          ComputerId                           Status  Transport TaskCount ErrorCount
         ------------          ----------                           ------  --------- --------- ----------
-        SRV099.contoso.com    11111111-2222-3333-4444-555555555502 Partial WinRM           158          1
+        SRV099.contoso.com    11111111-2222-3333-4444-555555555502 Success WinRM           158          0
 
         Collects from one domain member over WinRM HTTPS (port 5986). The name is the FQDN, which
         matches the subject of the member's listener certificate. The short name SRV099 would fail the
@@ -213,7 +248,9 @@ function Get-ScheduledTaskInventory {
         [string]$OutputPath,
 
         [ValidateRange(1, 256)]
-        [int]$ThrottleLimit = 32
+        [int]$ThrottleLimit = 32,
+
+        [switch]$SkipSidReference
     )
 
     begin {
@@ -254,6 +291,8 @@ function Get-ScheduledTaskInventory {
         $unattributedNames = [System.Collections.Generic.List[string]]::new()
         # Messages of remote errors that matched no requested computer and no unresolved name. Recorded here and warned about at the end of the function, for the same reason as the unattributed results: a warning is a terminating error under a caller's -WarningAction Stop, and it must not end the run before the files exist.
         $unattributedErrorMessages = [System.Collections.Generic.List[string]]::new()
+        # Per requested name, the paths of the missing binaries the worker named as known-absent Windows binaries. They are kept here, not on the row: no file and no result column carries them. Warned about after the rows are returned, for the same reason as the messages above.
+        $knownAbsentByName = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([System.StringComparer]::OrdinalIgnoreCase)
 
         if ($localNames.Count -gt 0) {
             # Local aliases share one worker run and one OutputFolder. The worker runs exactly once per call no matter how many aliases were requested, and each alias still gets its own row.
@@ -268,14 +307,17 @@ function Get-ScheduledTaskInventory {
             $localWorkerObject = $null
             $localExtraErrors = @()
             try {
-                $localWorkerObject = Invoke-ScheduledTaskInventoryLocal
+                $localWorkerObject = Invoke-ScheduledTaskInventoryLocal -SkipSidReference:$SkipSidReference
             } catch {
                 $localExtraErrors += $_.Exception.Message
             }
 
             # The first alias completes the computer and writes the folder. Every later alias copies that row and changes only ComputerName, so no two rows for one folder can ever disagree on Status, a count or Errors.
             $firstLocalRow = $null
+            $localKnownAbsentPaths = @(Get-ScheduledTaskInventorySafeProperty -InputObject $localWorkerObject -Name 'BinaryMissingExpectedPaths' -Default @() | Where-Object { -not [string]::IsNullOrEmpty($_) })
             foreach ($name in $localNames) {
+                # Every alias has its own row, so every alias gets its own warning lines.
+                $knownAbsentByName[$name] = $localKnownAbsentPaths
                 if ($null -eq $firstLocalRow) {
                     $firstLocalRow = Complete-ScheduledTaskInventoryComputer -RequestedComputerName $name -Transport 'Local' -RunFolder $runFolder -WorkerObject $localWorkerObject -ExtraErrors $localExtraErrors
                     $rowMap[$name] = $firstLocalRow
@@ -312,6 +354,7 @@ function Get-ScheduledTaskInventory {
 
                     $row = Complete-ScheduledTaskInventoryComputer -RequestedComputerName $requested -Transport 'WinRM' -RunFolder $runFolder -WorkerObject $res -ExtraErrors @()
                     $rowMap[$requested] = $row
+                    $knownAbsentByName[$requested] = @(Get-ScheduledTaskInventorySafeProperty -InputObject $res -Name 'BinaryMissingExpectedPaths' -Default @() | Where-Object { -not [string]::IsNullOrEmpty($_) })
                     [void]$matchedResultNames.Add($requested)
                 } catch {
                     # A throw out of this callback would end the whole run. The computer whose result broke is reported Failed instead, and the run goes on with the others.
@@ -327,7 +370,7 @@ function Get-ScheduledTaskInventory {
             $remoteResult = $null
             $remoteCallError = $null
             try {
-                $remoteResult = Invoke-ScheduledTaskInventoryRemote -ComputerName $remoteNames -Credential $Credential -ThrottleLimit $ThrottleLimit -OnResult $onRemoteResult -UseSSL:$UseSSL
+                $remoteResult = Invoke-ScheduledTaskInventoryRemote -ComputerName $remoteNames -Credential $Credential -ThrottleLimit $ThrottleLimit -OnResult $onRemoteResult -UseSSL:$UseSSL -SkipSidReference:$SkipSidReference
             } catch {
                 $remoteCallError = $_.Exception.Message
             }
@@ -387,7 +430,7 @@ function Get-ScheduledTaskInventory {
             RunId              = Split-Path -Path $runFolder -Leaf
             Collector          = 'RemoteScheduledTask'
             CollectorVersion   = $MyInvocation.MyCommand.Module.Version.ToString()
-            SchemaVersion      = '1.2'
+            SchemaVersion      = '1.3'
             HostComputer       = $env:COMPUTERNAME
             HostComputerId     = Get-ScheduledTaskInventoryHostComputerId
             HostUser           = "$env:USERDOMAIN\$env:USERNAME"
@@ -397,6 +440,7 @@ function Get-ScheduledTaskInventory {
             RequestedComputers = @($resolvedNames)
             ThrottleLimit      = $ThrottleLimit
             UseSSL             = [bool]$UseSSL
+            SkipSidReference   = [bool]$SkipSidReference
             Results            = @($rows)
         }
 
@@ -423,6 +467,14 @@ function Get-ScheduledTaskInventory {
                 Write-Warning "$($row.ComputerName): $($row.Error)"
             }
             $row
+        }
+
+        # One warning per known-absent path of every row, after the files are written and the rows are returned, so under a caller's -WarningAction Stop a caller that streams the output keeps the rows it has received, and the files are already written. A caller that assigns the result ($r = Get-ScheduledTaskInventory ... -WarningAction Stop) gets no rows when a warning stops the call.
+        foreach ($row in $rows) {
+            if (-not $knownAbsentByName.ContainsKey($row.ComputerName)) { continue }
+            foreach ($knownAbsentPath in $knownAbsentByName[$row.ComputerName]) {
+                Write-Warning "$($row.ComputerName): binary ${knownAbsentPath}: not found (Windows ships no such file; not counted as an error)"
+            }
         }
 
         foreach ($unattributedName in $unattributedNames) {

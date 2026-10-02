@@ -2,7 +2,7 @@
 
 .DESCRIPTION Turns one RSOP_GPO instance into one gpo object
 
-.VERSION 1.2.0
+.VERSION 1.3.0
 
 .GUID 7c89deae-cdd5-499d-8d6c-9cf812295395
 

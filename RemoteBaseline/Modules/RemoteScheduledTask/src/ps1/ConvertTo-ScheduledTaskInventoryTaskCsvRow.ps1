@@ -2,7 +2,7 @@
 
 .DESCRIPTION Builds the tasks.csv rows for one computer, with the Binary columns looked up by ExecutablePath
 
-.VERSION 1.3.0
+.VERSION 1.4.1
 
 .GUID 10c93fda-9ac4-4dd1-b0e1-d27e18510086
 

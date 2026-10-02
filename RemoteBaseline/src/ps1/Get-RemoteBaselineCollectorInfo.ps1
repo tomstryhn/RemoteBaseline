@@ -2,7 +2,7 @@
 
 .DESCRIPTION Returns the table of the five bundled collectors in run order, optionally filtered by type
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID 14157d57-bf1a-4c74-92d4-ec3ac0646e28
 

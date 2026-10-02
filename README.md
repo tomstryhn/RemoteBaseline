@@ -11,6 +11,7 @@ Collects the Windows Firewall, the Group Policy results, the scheduled tasks, th
   - [Bundled collectors](#bundled-collectors)
 - [Requirements](#requirements)
 - [Output Data Handling](#output-data-handling)
+- [Download](#download)
 - [Importing the Module](#importing-the-module)
 - [Examples](#examples)
 - [Functions](#functions)
@@ -23,6 +24,16 @@ Collects the Windows Firewall, the Group Policy results, the scheduled tasks, th
 - [License](#license)
 
 ## Version Changes
+
+##### 1.1.0
+
+- Bundles RemoteFirewall 1.3.0, RemoteRSOP 1.3.0, RemoteScheduledTask 1.4.1, RemoteSecEdit 1.6.0 and RemoteService 1.4.0.
+- An elevated run against Windows Server 2022, Windows Server 2025 or Windows 11 no longer comes back `Partial` for the Windows Update task whose program is not on the disk (`failover.exe`, `MusNotification.exe`): RemoteScheduledTask 1.4.1 records the file as data and does not count it as an error.
+- `RemoteBaseline-v<version>.zip` in the repository root holds the module folder and a quick guide, for download and sharing.
+- The SID reference of output convention 1.3 is read once per host and run. The first selected collector in run order reads `MachineSid`, `DomainSid`, `ComputerAccountSid` and `DomainNetbiosName`; every later collector is called with `-SkipSidReference`, so its `system.json` holds null for them. `Get-RemoteBaseline` has no new parameter.
+- `host.json` gains `MachineSid`, `DomainSid`, `ComputerAccountSid` and `DomainNetbiosName` directly after `MachineGuid`, copied from the first present `system.json` like its other identity values. In a bundle run `host.json` is the place to read them. A host the first selected collector did not reach has null in `host.json`.
+- A bundled collector whose function has no `-SkipSidReference` parameter is called without it, and nothing is reported. The values appear only with RemoteRSOP 1.3.0, RemoteScheduledTask 1.4.1, RemoteSecEdit 1.6.0, RemoteService 1.4.0 and RemoteFirewall 1.3.0 in the bundle.
+- Follows output convention 1.3: `run.json` carries `SchemaVersion` `1.3`. No new key in `run.json`.
 
 ##### 1.0.0
 
@@ -54,11 +65,13 @@ The collectors are not changed: the module holds their released module folders b
 
 | Module | Version | What it collects | Repository |
 |---|---|---|---|
-| RemoteFirewall | 1.2.0 | The three firewall profiles, the global settings, every firewall rule with its seven filters, and the security principals the rules name | https://github.com/tomstryhn/RemoteFirewall |
-| RemoteRSOP | 1.2.0 | The Resultant Set of Policy data Windows keeps in `root\RSOP`, and every account a user right or a restricted group references | https://github.com/tomstryhn/RemoteRSOP |
-| RemoteScheduledTask | 1.3.0 | Every scheduled task with its definition, account, security descriptor, run-time state and the identity and signature of each action binary | https://github.com/tomstryhn/RemoteScheduledTask |
-| RemoteSecEdit | 1.5.0 | The raw output of `secedit /export`, plain and `/mergedpolicy`, and every account the user rights reference | https://github.com/tomstryhn/RemoteSecEdit |
-| RemoteService | 1.3.0 | Every Windows service with its account, security descriptor, and the identity and signature of its binary | https://github.com/tomstryhn/RemoteService |
+| RemoteFirewall | 1.3.0 | The three firewall profiles, the global settings, every firewall rule with its seven filters, and the security principals the rules name | https://github.com/tomstryhn/RemoteFirewall |
+| RemoteRSOP | 1.3.0 | The Resultant Set of Policy data Windows keeps in `root\RSOP`, and every account a user right or a restricted group references | https://github.com/tomstryhn/RemoteRSOP |
+| RemoteScheduledTask | 1.4.1 | Every scheduled task with its definition, account, security descriptor, run-time state and the identity and signature of each action binary | https://github.com/tomstryhn/RemoteScheduledTask |
+| RemoteSecEdit | 1.6.0 | The raw output of `secedit /export`, plain and `/mergedpolicy`, and every account the user rights reference | https://github.com/tomstryhn/RemoteSecEdit |
+| RemoteService | 1.4.0 | Every Windows service with its account, security descriptor, and the identity and signature of its binary | https://github.com/tomstryhn/RemoteService |
+
+SID reference. From output convention 1.3 each collector can also read four values that say whose an `S-1-5-21-...` SID is: `MachineSid` (the computer's own account database; null on a domain controller), and `DomainSid`, `ComputerAccountSid` and `DomainNetbiosName` (null on a workgroup computer). RemoteBaseline has them read once per host and run: the first selected collector in run order reads them, every later one is called with `-SkipSidReference`, and `host.json` carries them. Read them from `host.json` in a bundle run, because the `system.json` of the later collectors holds null. A bundled collector without the switch is called without it and nothing is reported, so a bundle that holds the released 1.x collectors gives null in `host.json`; the values appear with RemoteRSOP 1.3.0, RemoteScheduledTask 1.4.1, RemoteSecEdit 1.6.0, RemoteService 1.4.0 and RemoteFirewall 1.3.0.
 
 ## Requirements
 
@@ -67,6 +80,8 @@ The collectors are not changed: the module holds their released module folders b
 - The module is read-only on every target: the collectors only read, and `Get-RemoteBaseline` adds no action on a target.
 
 Run elevated for a complete collection. Running without administrative rights has consequences that are captured in the rows rather than hidden, one per collector: RemoteFirewall comes back `Partial` (the address, port, interface and interface type filters and the installed packages cannot be read), RemoteRSOP `Failed` (the RSOP namespaces cannot be read), RemoteScheduledTask `Partial` (tasks the caller cannot open are not listed), RemoteSecEdit `Failed` (`secedit` exits with 740) and RemoteService `Partial` (services and security descriptors the caller cannot open are not listed). The row of the host is `Partial`, its per-type status columns say which collector was not clean, and `IsElevated` says which case a row is in. The Examples section shows such a run.
+
+An elevated run used to come back `Partial` with nothing wrong, and no longer does. Windows ships two tasks under `\Microsoft\Windows\UpdateOrchestrator` whose program is not on the disk: `UUS Failover Task` names `%systemroot%\system32\failover.exe` on Windows Server 2022, and `USO_UxBroker` names `%systemroot%\system32\MusNotification.exe` on Windows Server 2025 and Windows 11. Both belong to Windows Update, not to Failover Clustering. RemoteBaseline 1.0.0 (RemoteScheduledTask 1.3.0) reported such a row as `Partial`, with the error line `ScheduledTask: binary <path>: not found`. From 1.1.0 (RemoteScheduledTask 1.4.1) it is `Success`: the file is still recorded in the collector's `summary.json` (`BinaryMissingCount`, `BinaryMissingPaths`) and in `binaries.csv`, and a `Partial` row from an elevated run now names something that was not collected or not written.
 
 Hardening baselines can switch remote collection off. The CIS Level 2 benchmarks, for example,
 set "Allow remote server management through WinRM" to Disabled, which removes the WinRM
@@ -117,7 +132,7 @@ C:\BaselineRuns\RemoteBaseline-<yyyyMMdd-HHmmss>Z.zip      only with -Compress
 
 A suffix `_2`, `_3` is added to the run folder name when the name is taken, and to a host folder name when two requested names of one host (a short name and a fully qualified name) map to the same name; names of one local computer (`localhost`, `.` and its own name) share one host folder. A host that no selected collector reached has no host folder and a `Failed` row; a host that only some collectors reached has the subfolders of those collectors. The stamp in a host folder name is the stamp of the run folder; the stamp inside a collector's own folder names is that collector's. The subfolders hold exactly what the collector wrote, and each collector's README lists the files: `rules.csv` and the profile files for the firewall, `gpos.csv` and `settings.csv` for RSOP, `tasks.csv` and `binaries.csv` for the scheduled tasks, the `secedit-export` files for the security policy, `services.csv` and `binaries.csv` for the services, each with `system.json` and `summary.json`.
 
-`host.json` is deliberately not named `system.json`, so a loader that looks for computer folders by `system.json` never mistakes a host folder for one. Its keys, in this order: `ComputerName` (as requested, the first name for aliases), `RequestedNames`, `ComputerId`, `DnsHostName`, `Domain`, `OSCaption`, `OSVersion`, `CurrentBuild`, `UBR`, `DisplayVersion`, `EditionID`, `InstallationType`, `Culture`, `TimeZoneId`, `PartOfDomain`, `DomainRole`, `IsElevated` and `MachineGuid` (copied from the first present subfolder's `system.json`, null when absent), `Collector`, `CollectorVersion`, `RunId`, `Types`, `Collectors` (per selected type: `Type`, `Module`, `Version`, `Subfolder`, `Status`, `ErrorCount`, `RunId`), `Status` and `Errors`.
+`host.json` is deliberately not named `system.json`, so a loader that looks for computer folders by `system.json` never mistakes a host folder for one. Its keys, in this order: `ComputerName` (as requested, the first name for aliases), `RequestedNames`, `ComputerId`, `DnsHostName`, `Domain`, `OSCaption`, `OSVersion`, `CurrentBuild`, `UBR`, `DisplayVersion`, `EditionID`, `InstallationType`, `Culture`, `TimeZoneId`, `PartOfDomain`, `DomainRole`, `IsElevated`, `MachineGuid`, `MachineSid`, `DomainSid`, `ComputerAccountSid` and `DomainNetbiosName` (copied from the first present subfolder's `system.json`, null when absent; the last four are the SID reference, which only the first selected collector reads, so they are null when that collector did not reach the host), `Collector`, `CollectorVersion`, `RunId`, `Types`, `Collectors` (per selected type: `Type`, `Module`, `Version`, `Subfolder`, `Status`, `ErrorCount`, `RunId`), `Status` and `Errors`.
 
 `run.json` is one object, with the keys in this order: `RunId`, `Collector`, `CollectorVersion`, `SchemaVersion`, `HostComputer`, `HostComputerId`, `HostUser`, `PSVersion`, `StartUtc`, `EndUtc`, `RequestedComputers`, `Types`, `ThrottleLimit`, `UseSSL`, `Compress`, `Archive` (the zip name, null without `-Compress`), `Collectors` (per selected type: `Type`, `Module`, `Version`, `RunId`, `DurationMs`, `RowCount`, `SuccessCount`, `PartialCount`, `FailedCount`, `Error`) and `Results`, always an array. The collectors' own `run.json` keeps the `OutputFolder` values of the staging location where the computer folders were before they moved; the `run.json`, `results.csv` and `host.json` of the run folder are the authority for where files are.
 
@@ -145,6 +160,12 @@ unless unencrypted traffic has been allowed on the endpoint.
 File formats. The csv files are UTF-8 with a byte order mark, every cell quoted, one row per line (whitespace inside a cell is collapsed to one space); the json files are UTF-8 without a byte order mark, and a top-level array is an array at zero and one element too. The csv is for spreadsheets; a loader that needs the source form of a value, or the null against empty-string distinction, reads the json.
 
 `manifest.sha256` has one line per file of the run folder except itself: the SHA-256 in lower-case hexadecimal, two spaces, and the path relative to the run folder with forward slashes, sorted by ordinal comparison, with LF line endings and no byte order mark, so `sha256sum -c manifest.sha256` checks it on Linux and macOS.
+
+## Download
+
+Every release has `RemoteBaseline-v<version>.zip` in the root of the repository: the module folder `RemoteBaseline\` and a quick guide, `QuickGuide-v<version>.txt`, and nothing else, so it is quick to download and to hand to someone who only needs to run the collection. Extract it with "Extract All" and follow the guide. Only the zip of the current version is kept in the root.
+
+To check that the zip holds the same module as the repository, run the tests (see Testing): the release zip tests compare the entry names of the zip with the files of the module folder, and the SHA-256 of every file in the zip with the file on disk. They are skipped while the repository root holds no zip.
 
 ## Importing the Module
 
@@ -211,7 +232,7 @@ C:\BaselineRuns\RemoteBaseline-20261001-093321Z\
         RemoteService\          accounts, binaries, services (.csv and .json), summary.json, system.json
 ```
 
-The first lines of `host.json` of that run (the `Errors` list is the same 19 lines as in the row):
+The first lines of `host.json` of that run, which is a 1.0.0 run: it has no SID reference keys, and from 1.1.0 `host.json` has `MachineSid`, `DomainSid`, `ComputerAccountSid` and `DomainNetbiosName` between `MachineGuid` and `Collector`. The `Errors` list is the same 19 lines as in the row:
 
 ```json
 {
@@ -302,6 +323,15 @@ The list of the functions contained in this module.
     whole list of computers, in the fixed order Firewall, RSOP, ScheduledTask, SecEdit,
     Service, with the parameters of this call, and keeps its own WinRM fan-out. Targets are
     only read, never changed; this module adds no action on a target.
+
+    The SID reference (MachineSid, DomainSid, ComputerAccountSid and DomainNetbiosName, output
+    convention 1.3) is read once per host and run: the first selected collector in run order
+    reads it, and every later one is called with -SkipSidReference, so its system.json holds
+    null for the four values. host.json is the place to read them in a bundle run; a host the
+    first selected collector did not reach has null there. A bundled collector without the
+    switch is called without it. For the values to appear the bundle needs RemoteRSOP 1.3.0,
+    RemoteScheduledTask 1.4.1, RemoteSecEdit 1.6.0, RemoteService 1.4.0 and RemoteFirewall
+    1.3.0.
 
     Writes <OutputPath>\RemoteBaseline-<yyyyMMdd-HHmmss>Z\ (a _2, _3 suffix on collision)
     containing run.json, results.csv, manifest.sha256, a collectors folder with the run.json
@@ -407,9 +437,9 @@ The list of the functions contained in this module.
 
 1. Resolves `-OutputPath` once against the current location, creates the run folder `RemoteBaseline-<stamp>Z` (and `collectors\` inside it) and proves it can write. A failure here gives one `Failed` row per requested name with the error `output path: <message>`, no files, and the call returns before any target is contacted. On Windows PowerShell 5.1 a resolved path longer than 105 characters fails here too, because the staging layout needs about 150 characters below it and 5.1 limits a path to 260.
 2. Reads the identity of the collecting computer for `run.json`.
-3. Runs each selected collector once, in the fixed order Firewall, RSOP, ScheduledTask, SecEdit, Service, for the whole list of computers, with `-OutputPath` set to `collectors\`, the de-duplicated names, `-ThrottleLimit`, `-Credential` and `-UseSSL` only when given, and the collector's own warnings suppressed (their content reaches the caller through the rows). Each collector keeps its own WinRM fan-out. A collector that throws, which is not expected, gives every name a synthetic `Failed` row with the error `host: <message>`; a name a collector returned no row for gets a `Failed` row with `host: no result row returned`. The collector is called from this module's own nested module copy, never by name through your session, so an alias or function of the same name in a profile cannot take its place. The collector's run folder is renamed to `collectors\<Module>`, and only when it sits directly under `collectors\`.
+3. Runs each selected collector once, in the fixed order Firewall, RSOP, ScheduledTask, SecEdit, Service, for the whole list of computers, with `-OutputPath` set to `collectors\`, the de-duplicated names, `-ThrottleLimit`, `-Credential` and `-UseSSL` only when given, and the collector's own warnings suppressed (their content reaches the caller through the rows). Every collector but the first of the run is also called with `-SkipSidReference`, when its function has that parameter, so the SID reference is read once per host and run. Each collector keeps its own WinRM fan-out. A collector that throws, which is not expected, gives every name a synthetic `Failed` row with the error `host: <message>`; a name a collector returned no row for gets a `Failed` row with `host: no result row returned`. The collector is called from this module's own nested module copy, never by name through your session, so an alias or function of the same name in a profile cannot take its place. The collector's run folder is renamed to `collectors\<Module>`, and only when it sits directly under `collectors\`.
 4. Moves every computer folder a row names to `<host folder>\<Module>`, with a single rename on the same volume, so the files are not copied or touched; a computer folder that is not directly inside its collector's run folder is refused, and a rename or move that NTFS refuses is tried three times, 500 ms apart, before it counts as failed. The host folder is `<REPORTED>_<CurrentBuild>_<stamp of the run>Z`, built from the computer folder name by reading its stamp, build and reported name from the right. A name that an earlier collector already placed keeps its host folder, so one host ends in one folder per requested name whatever collectors reached it. A failure adds `arrange: <Module>: <message>` and leaves the folder where it was.
-5. Writes `host.json` in every host folder.
+5. Writes `host.json` in every host folder, with the four SID reference values after `MachineGuid` from the first present `system.json`.
 6. Builds the result rows, then writes `run.json` and `results.csv`.
 7. Writes `manifest.sha256` and, with `-Compress`, the zip. The manifest hashes every file with `Get-FileHash` and leaves no partial file on a failure; the zip is written with `System.IO.Compression`, with one entry per file in the order of the manifest, forward-slash entry names and no existing file overwritten, and a partial zip is removed.
 8. Emits the rows, then one `Write-Warning` per row whose `Status` is not `Success`: `<ComputerName>: <Status>, <ErrorCount> error(s): <Error>`. The warnings come last, so a caller's `-WarningAction Stop` already has the rows and every file.

@@ -2,7 +2,7 @@
 
 .DESCRIPTION Builds the services.csv rows for one computer, with the Binary columns looked up by ExecutablePath
 
-.VERSION 1.3.0
+.VERSION 1.4.0
 
 .GUID c65e9da4-b8c9-4dc0-9b4e-eeb188190f6d
 

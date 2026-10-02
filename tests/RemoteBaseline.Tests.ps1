@@ -2,7 +2,7 @@
 
 .DESCRIPTION Pester tests for the RemoteBaseline module
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID 12be8faa-73f6-4bc1-a25d-e733c0e74ff5
 
@@ -67,7 +67,7 @@ BeforeAll {
     $script:RunCollectorKeys = 'Type,Module,Version,RunId,DurationMs,RowCount,SuccessCount,PartialCount,FailedCount,Error'
     $script:RowKeys = 'ComputerName,ComputerId,Status,Transport,OutputFolder,IsElevated,Types,FirewallStatus,RSOPStatus,ScheduledTaskStatus,SecEditStatus,ServiceStatus,FirewallErrorCount,RSOPErrorCount,ScheduledTaskErrorCount,SecEditErrorCount,ServiceErrorCount,Error,ErrorCount,Errors'
     $script:CsvHeader = '"ComputerName","ComputerId","Status","Transport","OutputFolder","IsElevated","Types","FirewallStatus","RSOPStatus","ScheduledTaskStatus","SecEditStatus","ServiceStatus","FirewallErrorCount","RSOPErrorCount","ScheduledTaskErrorCount","SecEditErrorCount","ServiceErrorCount","Error","ErrorCount"'
-    $script:HostKeys = 'ComputerName,RequestedNames,ComputerId,DnsHostName,Domain,OSCaption,OSVersion,CurrentBuild,UBR,DisplayVersion,EditionID,InstallationType,Culture,TimeZoneId,PartOfDomain,DomainRole,IsElevated,MachineGuid,Collector,CollectorVersion,RunId,Types,Collectors,Status,Errors'
+    $script:HostKeys = 'ComputerName,RequestedNames,ComputerId,DnsHostName,Domain,OSCaption,OSVersion,CurrentBuild,UBR,DisplayVersion,EditionID,InstallationType,Culture,TimeZoneId,PartOfDomain,DomainRole,IsElevated,MachineGuid,MachineSid,DomainSid,ComputerAccountSid,DomainNetbiosName,Collector,CollectorVersion,RunId,Types,Collectors,Status,Errors'
     $script:HostCollectorKeys = 'Type,Module,Version,Subfolder,Status,ErrorCount,RunId'
     $script:IsoPattern = '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$'
 
@@ -103,6 +103,25 @@ BeforeAll {
         $entries = @{}
         foreach ($moduleName in $script:AllModules) { $entries[$moduleName] = $PerName }
         return $entries
+    }
+
+    # Whether each of the five collector functions has a SkipSidReference parameter, resolved the way the module resolves them (Get-RemoteBaselineCollectorCommand in the module's scope, so a mocked resolver is honoured too). One object per module, in the order of $script:TypeCases.
+    function Get-BundleSkipSidReferenceState {
+        $pairs = @($script:TypeCases | ForEach-Object { @{ Module = [string]$_.Module; Function = [string]$_.Function } })
+        $states = @(& $script:Module {
+                param($Pairs)
+                foreach ($pair in $Pairs) {
+                    $resolved = Get-RemoteBaselineCollectorCommand -Module $pair.Module -Function $pair.Function
+                    [pscustomobject]@{ Module = $pair.Module; HasSwitch = [bool]$resolved.Command.Parameters.ContainsKey('SkipSidReference') }
+                }
+            } $pairs)
+        return $states
+    }
+
+    # True when the five collectors agree: all have the parameter or none has. A half-refreshed bundle gives false.
+    function Test-BundleSkipSidReferenceUniform {
+        param([object[]]$State)
+        return (@($State | ForEach-Object { $_.HasSwitch } | Select-Object -Unique).Count -le 1)
     }
 
     # Puts the fake in place of the five collectors: the resolver is mocked in the module's scope to return the fake's FunctionInfo and the bundled version, and Start-Sleep to a no-op, so the retry of the arrangement never waits and a test can count its sleeps. Returns the state the fake fills.
@@ -349,6 +368,172 @@ Describe 'Get-RemoteBaseline - parameter forwarding' {
             { Get-RemoteBaseline -OutputPath (Join-Path -Path $TestDrive -ChildPath 'v1') -Type 'Bogus' } | Should -Throw
             { Get-RemoteBaseline -OutputPath (Join-Path -Path $TestDrive -ChildPath 'v2') -ThrottleLimit 0 } | Should -Throw
             { Get-RemoteBaseline -OutputPath (Join-Path -Path $TestDrive -ChildPath 'v3') -ThrottleLimit 257 } | Should -Throw
+        }
+    }
+}
+
+Describe 'Get-RemoteBaseline - the SID reference is read once per host and run (output convention 1.3)' {
+    BeforeAll {
+        $script:SidKeys = @('MachineSid', 'DomainSid', 'ComputerAccountSid', 'DomainNetbiosName')
+    }
+
+    Context 'B1, all five types' {
+        BeforeAll {
+            $script:S1 = Invoke-FakeBaseline -Parameter @{ ComputerName = @('ws01') }
+            $script:S1Host = Get-HostFolderOf -Run $script:S1 -Name 'ws01'
+        }
+
+        It 'calls the first collector without -SkipSidReference and the four later ones with it set' {
+            $script:S1.State.Calls.Count | Should -Be 5
+            $script:S1.State.Calls[0].Module | Should -BeExactly 'RemoteFirewall'
+            $script:S1.State.Calls[0].Bound.ContainsKey('SkipSidReference') | Should -BeFalse
+            foreach ($index in 1..4) {
+                $call = $script:S1.State.Calls[$index]
+                $call.Bound.ContainsKey('SkipSidReference') | Should -BeTrue -Because $call.Module
+                [bool]$call.Bound['SkipSidReference'] | Should -BeTrue -Because $call.Module
+            }
+        }
+
+        It 'leaves the four values with the first collector and null in the later collectors'' system.json' {
+            $first = Read-JsonFile -Path (Join-Path -Path $script:S1Host -ChildPath 'RemoteFirewall\system.json')
+            foreach ($key in $script:SidKeys) { $first.$key | Should -Not -BeNullOrEmpty -Because $key }
+            foreach ($moduleName in @('RemoteRSOP', 'RemoteScheduledTask', 'RemoteSecEdit', 'RemoteService')) {
+                $later = Read-JsonFile -Path (Join-Path -Path $script:S1Host -ChildPath ($moduleName + '\system.json'))
+                foreach ($key in $script:SidKeys) {
+                    $later.PSObject.Properties.Name | Should -Contain $key -Because ($moduleName + ' ' + $key)
+                    $later.$key | Should -BeNull -Because ($moduleName + ' ' + $key)
+                }
+            }
+        }
+    }
+
+    Context 'B2, -Type RSOP, Service' {
+        BeforeAll {
+            $script:S2 = Invoke-FakeBaseline -Parameter @{ ComputerName = @('ws01'); Type = @('Service', 'RSOP') }
+        }
+
+        It 'calls RSOP, the first in run order, without the switch and Service with it' {
+            (@($script:S2.State.Calls | ForEach-Object { $_.Module }) -join ',') | Should -BeExactly 'RemoteRSOP,RemoteService'
+            $script:S2.State.Calls[0].Bound.ContainsKey('SkipSidReference') | Should -BeFalse
+            [bool]$script:S2.State.Calls[1].Bound['SkipSidReference'] | Should -BeTrue
+        }
+    }
+
+    Context 'B3, one type' {
+        It 'calls the only collector without the switch' {
+            $run = Invoke-FakeBaseline -Parameter @{ ComputerName = @('ws01'); Type = @('SecEdit') }
+            $run.State.Calls.Count | Should -Be 1
+            $run.State.Calls[0].Bound.ContainsKey('SkipSidReference') | Should -BeFalse
+        }
+    }
+
+    Context 'B4, a collector whose command lacks the parameter' {
+        BeforeAll {
+            # RSOP is not the first collector, so it would get the switch, and its command cannot bind it.
+            $script:S4 = Invoke-FakeBaseline -Config @{ WithoutSkipSidReference = @('RemoteRSOP') } -Parameter @{ ComputerName = @('ws01') }
+        }
+
+        It 'calls that collector without the switch and the other later ones with it' {
+            $script:S4.State.Calls.Count | Should -Be 5
+            foreach ($call in $script:S4.State.Calls) {
+                if ($call.Module -in @('RemoteFirewall', 'RemoteRSOP')) {
+                    $call.Bound.ContainsKey('SkipSidReference') | Should -BeFalse -Because $call.Module
+                } else {
+                    [bool]$call.Bound['SkipSidReference'] | Should -BeTrue -Because $call.Module
+                }
+            }
+        }
+
+        It 'gives no error line, no warning and no host: row for it' {
+            $script:S4.Warnings.Count | Should -Be 0
+            foreach ($row in $script:S4.Rows) {
+                $row.Status | Should -BeExactly 'Success'
+                $row.ErrorCount | Should -Be 0
+                @($row.Errors).Count | Should -Be 0
+            }
+            $runJson = Read-JsonFile -Path (Join-Path -Path $script:S4.RunFolder -ChildPath 'run.json')
+            foreach ($entry in $runJson.Collectors) { $entry.Error | Should -BeNull -Because $entry.Module }
+        }
+    }
+
+    Context 'B5, host.json' {
+        It 'has the four keys directly after MachineGuid with the values of the first present system.json' {
+            $run = Invoke-FakeBaseline -Parameter @{ ComputerName = @('ws01') }
+            $hostFolder = Get-HostFolderOf -Run $run -Name 'ws01'
+            $hostJson = Read-JsonFile -Path (Join-Path -Path $hostFolder -ChildPath 'host.json')
+            $names = @($hostJson.PSObject.Properties.Name)
+            $at = $names.IndexOf('MachineGuid')
+            $at | Should -BeGreaterThan 0
+            ($names[($at + 1)..($at + 4)] -join ',') | Should -BeExactly ($script:SidKeys -join ',')
+            $names[$at + 5] | Should -BeExactly 'Collector'
+            $system = Read-JsonFile -Path (Join-Path -Path $hostFolder -ChildPath 'RemoteFirewall\system.json')
+            foreach ($key in $script:SidKeys) {
+                $system.$key | Should -Not -BeNullOrEmpty -Because $key
+                $hostJson.$key | Should -BeExactly $system.$key -Because $key
+            }
+        }
+
+        It 'has the four keys with null values when the first present system.json lacks them' {
+            $run = Invoke-FakeBaseline -Config @{ WithoutSkipSidReference = $script:AllModules } -Parameter @{ ComputerName = @('ws01') }
+            $hostJson = Read-JsonFile -Path (Join-Path -Path (Get-HostFolderOf -Run $run -Name 'ws01') -ChildPath 'host.json')
+            foreach ($key in $script:SidKeys) {
+                $hostJson.PSObject.Properties.Name | Should -Contain $key
+                $hostJson.$key | Should -BeNull -Because $key
+            }
+            (@($hostJson.PSObject.Properties.Name) -join ',') | Should -BeExactly $script:HostKeys
+        }
+
+        It 'has null values when the first selected collector did not reach the host and a later one, told to skip, did' {
+            $config = @{ Entries = @{ RemoteFirewall = @{ ws01 = @{ Mode = 'Missing' } } } }
+            $run = Invoke-FakeBaseline -Config $config -Parameter @{ ComputerName = @('ws01'); Type = @('Firewall', 'Service') }
+            $hostFolder = Get-HostFolderOf -Run $run -Name 'ws01'
+            $hostFolder | Should -Not -BeNullOrEmpty
+            $hostJson = Read-JsonFile -Path (Join-Path -Path $hostFolder -ChildPath 'host.json')
+            $hostJson.Collectors[0].Subfolder | Should -BeNull
+            $hostJson.Collectors[1].Subfolder | Should -BeExactly 'RemoteService'
+            foreach ($key in $script:SidKeys) {
+                $hostJson.PSObject.Properties.Name | Should -Contain $key
+                $hostJson.$key | Should -BeNull -Because $key
+            }
+        }
+    }
+
+    Context 'B6, Invoke-RemoteBaselineCollector alone' {
+        BeforeAll {
+            $script:B6Call = {
+                param($Type, $Staging, $Skip)
+                if ($Skip) { Invoke-RemoteBaselineCollector -Type $Type -ComputerName @('a1') -StagingPath $Staging -ThrottleLimit 3 -SkipSidReference }
+                else { Invoke-RemoteBaselineCollector -Type $Type -ComputerName @('a1') -StagingPath $Staging -ThrottleLimit 3 }
+            }
+        }
+
+        It 'passes SkipSidReference true to a command that has the parameter when the switch is set' {
+            $state = Register-FakeCollector
+            $staging = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
+            $result = & $script:Module $script:B6Call 'Service' $staging $true
+            $result.Error | Should -BeNull
+            $state.Calls.Count | Should -Be 1
+            $state.Calls[0].Bound.ContainsKey('SkipSidReference') | Should -BeTrue
+            [bool]$state.Calls[0].Bound['SkipSidReference'] | Should -BeTrue
+        }
+
+        It 'passes no such key when the switch is not set' {
+            $state = Register-FakeCollector
+            $staging = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
+            $result = & $script:Module $script:B6Call 'Service' $staging $false
+            $result.Error | Should -BeNull
+            $state.Calls.Count | Should -Be 1
+            $state.Calls[0].Bound.ContainsKey('SkipSidReference') | Should -BeFalse
+        }
+
+        It 'passes no such key, and reports nothing, when the switch is set but the command lacks the parameter' {
+            $state = Register-FakeCollector -Config @{ WithoutSkipSidReference = @('RemoteService') }
+            $staging = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
+            $result = & $script:Module $script:B6Call 'Service' $staging $true
+            $result.Error | Should -BeNull
+            $result.ArrangeError | Should -BeNull
+            $result.Rows[0].Status | Should -BeExactly 'Success'
+            $state.Calls[0].Bound.ContainsKey('SkipSidReference') | Should -BeFalse
         }
     }
 }
@@ -605,7 +790,7 @@ Describe 'Get-RemoteBaseline - a mixed run of five collectors and four names' {
             $script:RunJson.RunId | Should -BeExactly (Split-Path -Path $script:A.RunFolder -Leaf)
             $script:RunJson.Collector | Should -BeExactly 'RemoteBaseline'
             $script:RunJson.CollectorVersion | Should -BeExactly $script:ModuleVersion
-            $script:RunJson.SchemaVersion | Should -BeExactly '1.2'
+            $script:RunJson.SchemaVersion | Should -BeExactly '1.3'
             $script:RunJson.HostComputer | Should -BeExactly $env:COMPUTERNAME
             $script:RunJson.HostUser | Should -BeExactly "$env:USERDOMAIN\$env:USERNAME"
             $script:RunJson.PSVersion | Should -BeExactly $PSVersionTable.PSVersion.ToString()
@@ -1445,6 +1630,32 @@ Describe 'Bundle integrity, DESIGN.md section 9' {
         $inSession = @(Get-Module | Where-Object { $script:AllModules -contains $_.Name -and $_.ModuleBase.StartsWith($script:ModuleFolder, [System.StringComparison]::OrdinalIgnoreCase) })
         $inSession.Count | Should -Be 0
     }
+
+    # A mixed bundle (some collectors refreshed to output convention 1.3, some not) runs, but the SID reference then comes from whichever collector runs first, so the owner refreshes all five together. This guard fails on a half-refreshed bundle: it passes today (none has the parameter) and after a full refresh (all have it).
+    It 'holds five collectors that either all have a SkipSidReference parameter or none has' {
+        $state = @(Get-BundleSkipSidReferenceState)
+        $state.Count | Should -Be 5
+        $with = @($state | Where-Object { $_.HasSwitch } | ForEach-Object { $_.Module })
+        $without = @($state | Where-Object { -not $_.HasSwitch } | ForEach-Object { $_.Module })
+        (Test-BundleSkipSidReferenceUniform -State $state) | Should -BeTrue -Because ('half-refreshed bundle; with the parameter: ' + ($with -join ', ') + '; without it: ' + ($without -join ', '))
+    }
+
+    It 'sees a half-refreshed bundle: the same check over the fake resolver is uniform for none, uniform for all five, and not uniform for one or four legacy collectors' {
+        # The fake resolver returns a wrapper without the parameter for the modules in WithoutSkipSidReference and one with it for the rest, so the check below is proven to tell the cases apart and not to pass on anything.
+        $cases = @(
+            @{ Legacy = @(); HasCount = 5; Uniform = $true }
+            @{ Legacy = @('RemoteFirewall', 'RemoteRSOP', 'RemoteScheduledTask', 'RemoteSecEdit', 'RemoteService'); HasCount = 0; Uniform = $true }
+            @{ Legacy = @('RemoteService'); HasCount = 4; Uniform = $false }
+            @{ Legacy = @('RemoteFirewall', 'RemoteRSOP', 'RemoteSecEdit', 'RemoteService'); HasCount = 1; Uniform = $false }
+        )
+        foreach ($case in $cases) {
+            $null = Register-FakeCollector -Config @{ WithoutSkipSidReference = $case.Legacy }
+            $state = @(Get-BundleSkipSidReferenceState)
+            $state.Count | Should -Be 5
+            @($state | Where-Object { $_.HasSwitch }).Count | Should -Be $case.HasCount -Because ('legacy: ' + ($case.Legacy -join ', '))
+            (Test-BundleSkipSidReferenceUniform -State $state) | Should -Be $case.Uniform -Because ('legacy: ' + ($case.Legacy -join ', '))
+        }
+    }
 }
 
 Describe 'Get-RemoteBaseline - the bundled collector is called, not whatever has its name (section 13.1)' {
@@ -1781,9 +1992,9 @@ Describe 'Manifest' {
         $script:ManifestData.RequiredModules.Count | Should -Be 0
     }
 
-    It 'has Author Tom Stryhn and the module version 1.0.0' {
+    It 'has Author Tom Stryhn and the module version 1.1.0' {
         $script:ManifestData.Author | Should -Be 'Tom Stryhn'
-        $script:ManifestData.Version.ToString() | Should -BeExactly '1.0.0'
+        $script:ManifestData.Version.ToString() | Should -BeExactly '1.1.0'
     }
 
     It 'names every bundled version in ReleaseNotes' {
@@ -1887,6 +2098,114 @@ Describe 'Read-only source, DESIGN.md section 10' {
     It 'has no UNC path literal and sets StrictMode Latest in Get-RemoteBaseline' {
         @($script:StringLiteral | Where-Object { $_ -match '^\\\\' }).Count | Should -Be 0
         (Get-Content -LiteralPath (Join-Path -Path $script:ModuleFolder -ChildPath 'src\ps1\Get-RemoteBaseline.ps1') -Raw) | Should -Match 'Set-StrictMode -Version Latest'
+    }
+}
+
+# Discovery phase again: the presence of the release zip decides which tests exist (Pester binds -Skip at discovery). The zip is built at release by Update-RemoteBaselineBundle.ps1 in the monorepo root, which is not in the published repository, so the tests read only the zip and the module folder.
+$ReleaseZipRepoRoot = Split-Path -Path $PSScriptRoot -Parent
+$ReleaseZipVersion = [string](Import-PowerShellDataFile -LiteralPath (Join-Path -Path $ReleaseZipRepoRoot -ChildPath 'RemoteBaseline\RemoteBaseline.psd1')).ModuleVersion
+$ReleaseZipName = 'RemoteBaseline-v' + $ReleaseZipVersion + '.zip'
+$ReleaseZipPresent = Test-Path -LiteralPath (Join-Path -Path $ReleaseZipRepoRoot -ChildPath $ReleaseZipName) -PathType Leaf
+$ReleaseZipOtherPresent = @(Get-ChildItem -LiteralPath $ReleaseZipRepoRoot -File -Force | Where-Object { $_.Name -cmatch '^RemoteBaseline-v[0-9]+(\.[0-9]+){1,3}\.zip$' -and $_.Name -ne $ReleaseZipName }).Count -gt 0
+
+Describe 'Release zip, DESIGN.md section Release zip (1.1.0)' {
+    BeforeAll {
+        $script:ZipRepoRoot = Split-Path -Path $PSScriptRoot -Parent
+        $script:ZipVersion = [string](Import-PowerShellDataFile -LiteralPath $script:ManifestPath).ModuleVersion
+        $script:ZipName = 'RemoteBaseline-v' + $script:ZipVersion + '.zip'
+        $script:ZipPath = Join-Path -Path $script:ZipRepoRoot -ChildPath $script:ZipName
+        $script:ZipGuideName = 'QuickGuide-v' + $script:ZipVersion + '.txt'
+        $script:ZipEntryName = [System.Collections.Generic.List[string]]::new()
+        $script:ZipEntryHash = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::Ordinal)
+        $script:ZipGuideLine = $null
+        if (Test-Path -LiteralPath $script:ZipPath -PathType Leaf) {
+            $archive = [System.IO.Compression.ZipFile]::OpenRead($script:ZipPath)
+            try {
+                foreach ($zipEntry in $archive.Entries) {
+                    $stream = $zipEntry.Open()
+                    $memory = New-Object System.IO.MemoryStream
+                    try {
+                        $stream.CopyTo($memory)
+                    } finally {
+                        $stream.Dispose()
+                    }
+                    $bytes = $memory.ToArray()
+                    $memory.Dispose()
+                    $hasher = [System.Security.Cryptography.SHA256]::Create()
+                    try {
+                        $hash = [System.BitConverter]::ToString($hasher.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant()
+                    } finally {
+                        $hasher.Dispose()
+                    }
+                    [void]$script:ZipEntryName.Add($zipEntry.FullName)
+                    # A name twice would overwrite here; the names test compares the list, so the duplicate shows there.
+                    $script:ZipEntryHash[$zipEntry.FullName] = $hash
+                    if ($zipEntry.FullName -ceq $script:ZipGuideName) {
+                        $text = (New-Object System.Text.UTF8Encoding($false)).GetString($bytes)
+                        $lineEnd = $text.IndexOf("`n")
+                        if ($lineEnd -ge 0) { $text = $text.Substring(0, $lineEnd) }
+                        $script:ZipGuideLine = $text.TrimEnd("`r")
+                    }
+                }
+            } finally {
+                $archive.Dispose()
+            }
+        }
+        $script:ZipOther = @(Get-ChildItem -LiteralPath $script:ZipRepoRoot -File -Force | Where-Object { $_.Name -cmatch '^RemoteBaseline-v[0-9]+(\.[0-9]+){1,3}\.zip$' -and $_.Name -ne $script:ZipName } | ForEach-Object { $_.Name })
+    }
+
+    if (-not $ReleaseZipPresent -and -not $ReleaseZipOtherPresent) {
+        It 'is built at release by the bundle script, so this test is skipped while no release zip is in the repository root' -Skip {
+            Test-Path -LiteralPath $script:ZipPath | Should -BeTrue
+        }
+    }
+
+    if (-not $ReleaseZipPresent -and $ReleaseZipOtherPresent) {
+        It 'is a failure, not a skip, that a zip of another version is in the repository root while the zip of the current version is not' {
+            Test-Path -LiteralPath $script:ZipPath | Should -BeTrue -Because ("the repository root holds $($script:ZipOther -join ', ') but not $($script:ZipName); run Update-RemoteBaselineBundle.ps1")
+        }
+    }
+
+    if ($ReleaseZipPresent) {
+        It 'has exactly the quick guide and RemoteBaseline/ plus the relative path of every file of the module folder, with forward slashes and no directory entry' {
+            $expected = [System.Collections.Generic.List[string]]::new()
+            [void]$expected.Add($script:ZipGuideName)
+            foreach ($relative in @(Get-RelativeFile -Root $script:ModuleFolder)) { [void]$expected.Add('RemoteBaseline/' + $relative) }
+            $missing = @($expected | Where-Object { -not $script:ZipEntryName.Contains($_) })
+            $extra = @($script:ZipEntryName | Where-Object { -not $expected.Contains($_) })
+            $missing.Count | Should -Be 0 -Because ('in the module folder or the guide, not in the zip: ' + ($missing -join ', '))
+            $extra.Count | Should -Be 0 -Because ('in the zip, not expected: ' + ($extra -join ', '))
+            $script:ZipEntryName.Count | Should -Be $expected.Count -Because 'an entry name must not appear twice'
+            @($script:ZipEntryName | Where-Object { $_.Contains('\') -or $_.EndsWith('/') }).Count | Should -Be 0
+        }
+
+        It 'lists the entries in ordinal order of the entry name' {
+            $sorted = [string[]]$script:ZipEntryName.ToArray()
+            [System.Array]::Sort($sorted, [System.StringComparer]::Ordinal)
+            ($script:ZipEntryName.ToArray() -join "`n") | Should -BeExactly ($sorted -join "`n")
+        }
+
+        It 'holds the bytes of the file on disk for every module entry (SHA-256)' {
+            $relativeFiles = @(Get-RelativeFile -Root $script:ModuleFolder)
+            $relativeFiles.Count | Should -BeGreaterThan 20
+            $differs = [System.Collections.Generic.List[string]]::new()
+            foreach ($relative in $relativeFiles) {
+                $entryName = 'RemoteBaseline/' + $relative
+                $diskHash = Get-Sha256Hex -Path (Join-Path -Path $script:ModuleFolder -ChildPath $relative.Replace('/', '\'))
+                if (-not $script:ZipEntryHash.ContainsKey($entryName) -or $script:ZipEntryHash[$entryName] -ne $diskHash) { [void]$differs.Add($entryName) }
+            }
+            $differs.Count | Should -Be 0 -Because ('entries that differ from the file on disk: ' + ($differs -join ', '))
+        }
+
+        It 'starts the guide entry with the line RemoteBaseline, the version and Quick Guide' {
+            # Ordinal, not -ceq: a culture-aware comparison ignores a byte order mark in front of the line.
+            $expectedGuideLine = 'RemoteBaseline ' + $script:ZipVersion + ' Quick Guide'
+            [string]::Equals($script:ZipGuideLine, $expectedGuideLine, [System.StringComparison]::Ordinal) | Should -BeTrue -Because ("the first line of $($script:ZipGuideName) is '$($script:ZipGuideLine)'")
+        }
+
+        It 'has no other zip named RemoteBaseline-v and a plain version number in the repository root' {
+            $script:ZipOther.Count | Should -Be 0 -Because ('another release zip: ' + ($script:ZipOther -join ', '))
+        }
     }
 }
 

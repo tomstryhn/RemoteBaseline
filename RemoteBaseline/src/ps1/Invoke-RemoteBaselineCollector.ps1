@@ -2,7 +2,7 @@
 
 .DESCRIPTION Runs one bundled collector into the staging folder and renames its run folder to the module name
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID 098345b5-b4b3-425b-9423-f690d25bef09
 
@@ -32,6 +32,11 @@ function Invoke-RemoteBaselineCollector {
         -WarningAction SilentlyContinue (the collector's own warnings reach the caller through the
         rows). -Credential and -UseSSL are passed only when given. The rows are captured and the
         call is timed. Version comes from the same resolution, so it is the version that ran.
+
+        -SkipSidReference is passed only when the switch is set here and the resolved command has a
+        parameter of that name: a bundled collector from before output convention 1.3 does not, is
+        called without it, and nothing is reported. The caller sets the switch for every collector
+        but the first of a run, so the SID reference is read once per host and run.
 
         A throw from the collector, or from the resolver ("collector <Module> not bundled"), which
         is not expected, is caught: every requested name gets a synthetic Failed row with the error
@@ -77,6 +82,10 @@ function Invoke-RemoteBaselineCollector {
     .PARAMETER ThrottleLimit
         Passed to the collector. Always passed explicitly by the caller.
 
+    .PARAMETER SkipSidReference
+        Passes -SkipSidReference to the collector, which then leaves the SID reference unread, but
+        only when the collector's command has that parameter.
+
     .NOTES
         FUNCTION: Invoke-RemoteBaselineCollector
         AUTHOR:   Tom Stryhn
@@ -106,7 +115,9 @@ function Invoke-RemoteBaselineCollector {
 
         [Parameter(Mandatory = $true)]
         [ValidateRange(1, 256)]
-        [int]$ThrottleLimit
+        [int]$ThrottleLimit,
+
+        [switch]$SkipSidReference
     )
 
     $info = @(Get-RemoteBaselineCollectorInfo -Type $Type) | Select-Object -First 1
@@ -134,6 +145,8 @@ function Invoke-RemoteBaselineCollector {
         $resolved = Get-RemoteBaselineCollectorCommand -Module $info.Module -Function $info.Function
         $version = $resolved.Version
         $collectorCommand = $resolved.Command
+        # Only a collector that has the parameter gets it: a bundled copy from before convention 1.3 would fail the bind, and the caller needs no line about it.
+        if ($SkipSidReference -and $collectorCommand.Parameters.ContainsKey('SkipSidReference')) { $callParams['SkipSidReference'] = $true }
         $rows = @(& $collectorCommand @callParams | Where-Object { $null -ne $_ })
     } catch {
         $hostError = ConvertTo-RemoteBaselineOneLine -Text $_.Exception.Message

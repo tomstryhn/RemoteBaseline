@@ -2,7 +2,7 @@
 
 .DESCRIPTION Turns one setting class instance into zero or more flat setting objects
 
-.VERSION 1.2.0
+.VERSION 1.3.0
 
 .GUID 8a48f839-9fbb-46ba-857c-49b7b4e21398
 

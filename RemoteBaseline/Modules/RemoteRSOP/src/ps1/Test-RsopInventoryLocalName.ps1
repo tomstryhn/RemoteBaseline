@@ -2,7 +2,7 @@
 
 .DESCRIPTION Tests whether a computer name identifies the local computer
 
-.VERSION 1.2.0
+.VERSION 1.3.0
 
 .GUID b0a7ffab-4777-4b81-8840-c100ff0626ec
 

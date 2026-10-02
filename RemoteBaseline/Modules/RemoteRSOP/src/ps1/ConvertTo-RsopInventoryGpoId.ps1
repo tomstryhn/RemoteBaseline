@@ -2,7 +2,7 @@
 
 .DESCRIPTION Turns a raw GPO id into the GpoId the output files carry
 
-.VERSION 1.2.0
+.VERSION 1.3.0
 
 .GUID c310c44e-29e3-4c14-be52-a3a9284d99b4
 

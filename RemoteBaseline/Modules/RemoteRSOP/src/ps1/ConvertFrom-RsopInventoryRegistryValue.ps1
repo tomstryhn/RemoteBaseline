@@ -2,7 +2,7 @@
 
 .DESCRIPTION Decodes a raw RSOP registry value into its typed PowerShell form
 
-.VERSION 1.2.0
+.VERSION 1.3.0
 
 .GUID 44137286-581b-4137-840d-db70a6d5a617
 

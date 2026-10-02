@@ -2,7 +2,7 @@
 
 .DESCRIPTION Builds one RemoteBaseline.Result row from the collectors' rows for one requested name
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID a26b8d89-58c5-4cb3-a5b0-e80249d67712
 

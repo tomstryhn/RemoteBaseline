@@ -2,7 +2,7 @@
 
 .DESCRIPTION Resolves a bundled collector function and its version from this module's nested modules
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID 8a5f0c1e-6b3d-4e92-a7c4-2d9b71e05f38
 

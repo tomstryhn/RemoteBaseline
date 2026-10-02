@@ -2,7 +2,7 @@
 
 .DESCRIPTION Turns one RSOP_ExtensionStatus instance into one extension object
 
-.VERSION 1.2.0
+.VERSION 1.3.0
 
 .GUID 22f75539-e447-41ff-9bb8-cceef0771f68
 

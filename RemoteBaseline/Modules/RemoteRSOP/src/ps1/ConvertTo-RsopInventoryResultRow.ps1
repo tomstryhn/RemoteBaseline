@@ -2,7 +2,7 @@
 
 .DESCRIPTION Builds one RemoteRSOP.Result row
 
-.VERSION 1.2.0
+.VERSION 1.3.0
 
 .GUID 9e3bc644-c4ae-4cf1-9928-a7c60e00ad7b
 

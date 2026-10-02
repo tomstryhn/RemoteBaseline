@@ -2,7 +2,7 @@
 
 .DESCRIPTION Returns the self-contained scriptblock that collects the scheduled task inventory on a target
 
-.VERSION 1.3.0
+.VERSION 1.4.1
 
 .GUID dac065f2-91e4-4b6c-80f8-ae90183a82a2
 
@@ -28,14 +28,27 @@ function Get-ScheduledTaskInventoryWorker {
     .DESCRIPTION
         The scriptblock this function returns is what actually runs on the target, local or
         remote, so it uses no module function, no module variable and no using: expression. It
-        takes -ScheduleService, untyped and optional: production callers pass nothing and the
-        scriptblock creates its own Schedule.Service COM object, tests pass a fake object built
-        the same shape. It reads every scheduled task the ScheduledTasks module can see, exports
+        takes -SkipSidReference, a bool that defaults to $false and is the first parameter
+        because the remote call passes it positionally: with $true the four SID reference
+        values (MachineSid, DomainSid, ComputerAccountSid, DomainNetbiosName) stay null and
+        are not read. Otherwise MachineSid is read from the local account with RID 500 through
+        Win32_UserAccount, and on a domain-joined computer the other three from the computer's
+        own domain account through one account name lookup; Win32_UserAccount lists no local
+        account on a domain controller, so MachineSid is null there. It also takes -ScheduleService, untyped and optional: production callers
+        pass nothing and the scriptblock creates its own Schedule.Service COM object, tests
+        pass a fake object built the same shape. It reads every scheduled task the
+        ScheduledTasks module can see, exports
         each task's definition and flattens it into the fields an operator reads (the definition
         text itself is not kept), the run-time state of each task, the security descriptor the
         Task Scheduler service enforces, the account each task runs as and that account's SID,
         and the identity and signature of every distinct binary an Exec action starts, and
-        returns one flat object describing the target and all of it. It never throws: every
+        returns one flat object describing the target and all of it. A missing binary that is
+        failover.exe or MusNotification.exe in the target's own System32, named only by tasks
+        under \Microsoft\Windows\UpdateOrchestrator\ (the two programs Windows does not ship), is
+        known-absent: it keeps its binaries row (Exists false, Error not found) and counts in
+        BinaryMissingCount, but adds no line to Errors, and is counted again in
+        BinaryMissingExpectedCount and listed in BinaryMissingExpectedPaths, the two properties
+        that follow BinaryMissingCount. It never throws: every
         step is wrapped in its own try/catch and appends to
         an Errors list instead. It runs no native command and writes nothing to the target's disk.
         Invoke-ScheduledTaskInventoryLocal calls it directly for the local computer.
@@ -57,6 +70,8 @@ function Get-ScheduledTaskInventoryWorker {
 
     return {
         param(
+            [bool]$SkipSidReference = $false,
+
             $ScheduleService
         )
 
@@ -249,6 +264,51 @@ function Get-ScheduledTaskInventoryWorker {
             $machineGuid = [string](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name MachineGuid -ErrorAction Stop).MachineGuid
         }
         catch { $errors += "identity: MachineGuid: $($_.Exception.Message)" }
+        #endregion
+
+        #region SID reference
+        # Four reference values that say whose an S-1-5-21 SID is; none is used as identity. MachineSid is the SID of the computer's own account database: the built-in Administrator (RID 500, whatever its name or state) without the RID. The filter names the computer as the domain, so only the local accounts are read; a domain controller has no such row and keeps null with no error. The domain values come from the computer's own account and are read only on a domain-joined computer. -SkipSidReference leaves all four null with no error.
+        $machineSid = $null
+        $domainSid = $null
+        $computerAccountSid = $null
+        $domainNetbiosName = $null
+        if (-not $SkipSidReference) {
+            try {
+                $localAccounts = @(Get-CimInstance -ClassName Win32_UserAccount -Filter ('Domain = "{0}"' -f $env:COMPUTERNAME) -ErrorAction Stop -Verbose:$false)
+                foreach ($localAccount in $localAccounts) {
+                    if ([string]$localAccount.SID -match '^(S-1-5-21-\d+-\d+-\d+)-500$') {
+                        $machineSid = $matches[1]
+                        break
+                    }
+                }
+            }
+            catch { $errors += "identity: MachineSid: $($_.Exception.Message)" }
+
+            if ($partOfDomain) {
+                $computerAccountSidObject = $null
+                try {
+                    $computerAccount = New-Object System.Security.Principal.NTAccount(($domain + '\' + $env:COMPUTERNAME + '$'))
+                    $computerAccountSidObject = $computerAccount.Translate([System.Security.Principal.SecurityIdentifier])
+                    $computerAccountSid = $computerAccountSidObject.Value
+                    $domainSid = $computerAccountSidObject.AccountDomainSid.Value
+                }
+                catch {
+                    $computerAccountSidObject = $null
+                    $computerAccountSid = $null
+                    $domainSid = $null
+                    $errors += "identity: DomainSid: $($_.Exception.GetBaseException().Message)"
+                }
+
+                if ($null -ne $computerAccountSidObject) {
+                    try {
+                        $computerAccountName = $computerAccountSidObject.Translate([System.Security.Principal.NTAccount]).Value
+                        $separatorIndex = $computerAccountName.IndexOf('\')
+                        if ($separatorIndex -gt 0) { $domainNetbiosName = $computerAccountName.Substring(0, $separatorIndex) }
+                    }
+                    catch { $errors += "identity: DomainNetbiosName: $($_.Exception.GetBaseException().Message)" }
+                }
+            }
+        }
         #endregion
         #endregion
 
@@ -766,15 +826,30 @@ function Get-ScheduledTaskInventoryWorker {
         $binaries = @()
         $binaryCount = 0
         $binaryMissingCount = 0
+        $binaryMissingExpectedCount = 0
+        $binaryMissingExpectedPaths = New-Object System.Collections.Generic.List[string]
         $binariesDurationMs = 0
+
+        # Known-absent Windows binaries (1.4.1): two inbox tasks of the Update Orchestrator point at a program Windows does not ship (failover.exe on Server 2022, MusNotification.exe on Server 2025 and Windows 11). A missing binary is known-absent when its path is one of these two files in this computer's System32 and every task that names that path in an Exec action sits under the Update Orchestrator task folder; one task elsewhere naming the same file makes it an ordinary missing binary. Such a binary is still a missing binary in the row and the counts, but it adds no line to the errors.
+        $knownAbsentBinaryPaths = @(($env:SystemRoot + '\System32\failover.exe'), ($env:SystemRoot + '\System32\MusNotification.exe'))
+        $knownAbsentTaskFolder = '\Microsoft\Windows\UpdateOrchestrator\'
 
         $seenPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
         $execPathList = New-Object System.Collections.Generic.List[string]
+        # Per distinct path: whether every Exec action naming it belongs to a task under the known-absent task folder. Compares like $seenPaths, case-insensitively.
+        $onlyUnderKnownAbsentFolder = New-Object 'System.Collections.Generic.Dictionary[string,bool]' ([System.StringComparer]::OrdinalIgnoreCase)
         foreach ($t in $tasks) {
+            $taskUnderKnownAbsentFolder = ([string]$t.TaskPath).StartsWith($knownAbsentTaskFolder, [System.StringComparison]::OrdinalIgnoreCase)
             foreach ($action in $t.Actions) {
                 if ($action.Type -ne 'Exec') { continue }
                 $ep = $action.ExecutablePath
-                if ($ep -and $seenPaths.Add($ep)) { [void]$execPathList.Add($ep) }
+                if (-not $ep) { continue }
+                if ($seenPaths.Add($ep)) {
+                    [void]$execPathList.Add($ep)
+                    $onlyUnderKnownAbsentFolder[$ep] = $taskUnderKnownAbsentFolder
+                } elseif (-not $taskUnderKnownAbsentFolder) {
+                    $onlyUnderKnownAbsentFolder[$ep] = $false
+                }
             }
         }
         $execPathList.Sort( [Comparison[string]] { param($a, $b) [string]::Compare($a, $b, [System.StringComparison]::Ordinal) } )
@@ -806,8 +881,21 @@ function Get-ScheduledTaskInventoryWorker {
 
             if (-not $exists) {
                 $binError = 'not found'
-                $errors += "binary ${path}: not found"
                 $binaryMissingCount++
+
+                $pathIsKnownAbsent = $false
+                if ($onlyUnderKnownAbsentFolder[$path]) {
+                    foreach ($knownAbsentBinaryPath in $knownAbsentBinaryPaths) {
+                        if ([string]::Equals($path, $knownAbsentBinaryPath, [System.StringComparison]::OrdinalIgnoreCase)) { $pathIsKnownAbsent = $true; break }
+                    }
+                }
+
+                if ($pathIsKnownAbsent) {
+                    $binaryMissingExpectedCount++
+                    [void]$binaryMissingExpectedPaths.Add($path)
+                } else {
+                    $errors += "binary ${path}: not found"
+                }
             } else {
                 try {
                     $fileInfo = Get-Item -LiteralPath $path -ErrorAction Stop
@@ -873,42 +961,48 @@ function Get-ScheduledTaskInventoryWorker {
         $collectedUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
 
         [pscustomobject]@{
-            ComputerName           = $env:COMPUTERNAME
-            DnsHostName            = $dnsHostName
-            Domain                 = $domain
-            OSCaption              = $osCaption
-            OSVersion              = $osVersion
-            CurrentBuild           = $currentBuild
-            UBR                    = $ubr
-            DisplayVersion         = $displayVersion
-            EditionID              = $editionId
-            InstallationType       = $installationType
-            Culture                = $culture
-            TimeZoneId             = $timeZoneId
-            PSVersion              = $PSVersionTable.PSVersion.ToString()
-            CollectedBy            = $collectedBy
-            PartOfDomain           = [bool]$partOfDomain
-            IsElevated             = [bool]$isElevated
-            DomainRole             = [int]$domainRole
-            CollectedUtc           = $collectedUtc
-            ComputerId             = $computerId
-            MachineGuid            = $machineGuid
-            TaskCount              = [int]$taskCount
-            XmlFailedCount         = [int]$xmlFailedCount
-            SddlFailedCount        = [int]$sddlFailedCount
-            BinaryCount            = [int]$binaryCount
-            BinaryMissingCount     = [int]$binaryMissingCount
-            AccountCount           = [int]$accountCount
-            AccountUnresolvedCount = [int]$accountUnresolvedCount
-            HiddenCount            = [int]$hiddenCount
-            TasksDurationMs        = [int]$tasksDurationMs
-            SddlDurationMs         = [int]$sddlDurationMs
-            AccountsDurationMs     = [int]$accountsDurationMs
-            BinariesDurationMs     = [int]$binariesDurationMs
-            Tasks                  = @($tasks)
-            Accounts               = @($accounts)
-            Binaries               = @($binaries)
-            Errors                 = @($errors | ForEach-Object { ([string]$_).Trim() -replace '\s+', ' ' })
+            ComputerName               = $env:COMPUTERNAME
+            DnsHostName                = $dnsHostName
+            Domain                     = $domain
+            OSCaption                  = $osCaption
+            OSVersion                  = $osVersion
+            CurrentBuild               = $currentBuild
+            UBR                        = $ubr
+            DisplayVersion             = $displayVersion
+            EditionID                  = $editionId
+            InstallationType           = $installationType
+            Culture                    = $culture
+            TimeZoneId                 = $timeZoneId
+            PSVersion                  = $PSVersionTable.PSVersion.ToString()
+            CollectedBy                = $collectedBy
+            PartOfDomain               = [bool]$partOfDomain
+            IsElevated                 = [bool]$isElevated
+            DomainRole                 = [int]$domainRole
+            CollectedUtc               = $collectedUtc
+            ComputerId                 = $computerId
+            MachineGuid                = $machineGuid
+            MachineSid                 = $machineSid
+            DomainSid                  = $domainSid
+            ComputerAccountSid         = $computerAccountSid
+            DomainNetbiosName          = $domainNetbiosName
+            TaskCount                  = [int]$taskCount
+            XmlFailedCount             = [int]$xmlFailedCount
+            SddlFailedCount            = [int]$sddlFailedCount
+            BinaryCount                = [int]$binaryCount
+            BinaryMissingCount         = [int]$binaryMissingCount
+            BinaryMissingExpectedCount = [int]$binaryMissingExpectedCount
+            BinaryMissingExpectedPaths = @($binaryMissingExpectedPaths.ToArray())
+            AccountCount               = [int]$accountCount
+            AccountUnresolvedCount     = [int]$accountUnresolvedCount
+            HiddenCount                = [int]$hiddenCount
+            TasksDurationMs            = [int]$tasksDurationMs
+            SddlDurationMs             = [int]$sddlDurationMs
+            AccountsDurationMs         = [int]$accountsDurationMs
+            BinariesDurationMs         = [int]$binariesDurationMs
+            Tasks                      = @($tasks)
+            Accounts                   = @($accounts)
+            Binaries                   = @($binaries)
+            Errors                     = @($errors | ForEach-Object { ([string]$_).Trim() -replace '\s+', ' ' })
         }
         #endregion
     }

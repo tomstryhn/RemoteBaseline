@@ -2,7 +2,7 @@
 
 .DESCRIPTION Collects the Resultant Set of Policy data from local or remote computers
 
-.VERSION 1.2.0
+.VERSION 1.3.0
 
 .GUID b98d75bd-6771-4cfd-91af-2dd1a6de3bd7
 
@@ -41,6 +41,15 @@ function Get-RsopInventory {
         alongside its ComputerName, so a computer that was renamed or moved between domains still
         joins across runs. The output layout, key order and types are shared with RemoteSecEdit,
         RemoteService and RemoteScheduledTask.
+
+        Every system.json also carries four SID reference values: MachineSid (the SID of the
+        computer's own account database, without the RID), and on a domain-joined computer
+        DomainSid, ComputerAccountSid and DomainNetbiosName. MachineSid is read from the local
+        account with RID 500 through CIM (Win32_UserAccount, filtered on the computer name as the
+        domain). The domain values come from the computer's own domain account, through the same
+        account lookup the module uses for the accounts table, and only on a domain-joined
+        computer. No Active Directory module and no LDAP is involved. A domain controller has no
+        MachineSid, and a workgroup computer has null domain values.
 
         Prerequisites, and nothing beyond them: Windows PowerShell 5.1 or PowerShell 7 on the
         collecting computer; the targets run Windows PowerShell 5.1. The caller needs
@@ -93,6 +102,13 @@ function Get-RsopInventory {
 
     .PARAMETER ThrottleLimit
         Passed to Invoke-Command for remote targets. From 1 to 256. Defaults to 32.
+
+    .PARAMETER SkipSidReference
+        Leaves the SID reference unread: MachineSid, DomainSid, ComputerAccountSid and
+        DomainNetbiosName are null in system.json, and run.json records SkipSidReference true.
+        Meant for a caller that runs several collectors against the same computers and needs the
+        reference from one of them only, as RemoteBaseline does. Without the switch every run
+        reads it.
 
     .EXAMPLE
         PS C:\> $rows = Get-RsopInventory -ComputerName 'SRV050', 'WS01', 'DC02', 'NOSUCHHOST01' -Credential $cred -OutputPath C:\Spike\RemoteRSOP\runs
@@ -173,7 +189,9 @@ function Get-RsopInventory {
         [string]$OutputPath,
 
         [ValidateRange(1, 256)]
-        [int]$ThrottleLimit = 32
+        [int]$ThrottleLimit = 32,
+
+        [switch]$SkipSidReference
     )
 
     begin {
@@ -228,7 +246,7 @@ function Get-RsopInventory {
             $localWorkerObject = $null
             $localExtraErrors = @()
             try {
-                $localWorkerObject = Invoke-RsopInventoryLocal
+                $localWorkerObject = Invoke-RsopInventoryLocal -SkipSidReference:$SkipSidReference
             } catch {
                 $localExtraErrors += $_.Exception.Message
             }
@@ -287,7 +305,7 @@ function Get-RsopInventory {
             $remoteResult = $null
             $remoteCallError = $null
             try {
-                $remoteResult = Invoke-RsopInventoryRemote -ComputerName $remoteNames -Credential $Credential -ThrottleLimit $ThrottleLimit -OnResult $onRemoteResult -UseSSL:$UseSSL
+                $remoteResult = Invoke-RsopInventoryRemote -ComputerName $remoteNames -Credential $Credential -ThrottleLimit $ThrottleLimit -OnResult $onRemoteResult -UseSSL:$UseSSL -SkipSidReference:$SkipSidReference
             } catch {
                 $remoteCallError = $_.Exception.Message
             }
@@ -347,7 +365,7 @@ function Get-RsopInventory {
             RunId              = Split-Path -Path $runFolder -Leaf
             Collector          = 'RemoteRSOP'
             CollectorVersion   = $MyInvocation.MyCommand.Module.Version.ToString()
-            SchemaVersion      = '1.2'
+            SchemaVersion      = '1.3'
             HostComputer       = $env:COMPUTERNAME
             HostComputerId     = Get-RsopInventoryHostComputerId
             HostUser           = "$env:USERDOMAIN\$env:USERNAME"
@@ -357,6 +375,7 @@ function Get-RsopInventory {
             RequestedComputers = @($resolvedNames)
             ThrottleLimit      = $ThrottleLimit
             UseSSL             = [bool]$UseSSL
+            SkipSidReference   = [bool]$SkipSidReference
             Results            = @($rows)
         }
 

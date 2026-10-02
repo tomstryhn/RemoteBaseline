@@ -2,7 +2,7 @@
 
 .DESCRIPTION Writes the run folder as one zip beside it, with forward-slash entry names
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID 5f0b8a1e-7c34-4d2a-9b6e-2a41c8d3e957
 

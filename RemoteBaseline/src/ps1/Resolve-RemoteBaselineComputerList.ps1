@@ -2,7 +2,7 @@
 
 .DESCRIPTION Cleans a list of computer names
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID 0ab1749e-bf93-4641-8dca-da0336024ab7
 

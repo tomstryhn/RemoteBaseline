@@ -2,7 +2,7 @@
 
 .DESCRIPTION Matches one remote error record to a requested computer name
 
-.VERSION 1.2.0
+.VERSION 1.3.0
 
 .GUID 4683bd9d-522f-4b47-9b0d-c0e3ad28966f
 

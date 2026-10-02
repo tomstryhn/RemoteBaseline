@@ -2,7 +2,7 @@
 
 .DESCRIPTION Runs PSScriptAnalyzer and the Pester suite for RemoteBaseline
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID 03c735de-9c08-4dd6-a6a6-ce1d2d55fb0e
 

@@ -2,7 +2,7 @@
 
 .DESCRIPTION Returns a property value from an object, or a default when the object or the property is missing
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID 27d79293-ae15-4623-843f-94743b46526f
 

@@ -2,7 +2,7 @@
 
 .DESCRIPTION Creates the run folder under OutputPath and proves it is writable
 
-.VERSION 1.2.0
+.VERSION 1.3.0
 
 .GUID 97ec0e0f-98fb-48b5-acc3-cbb5a97942d0
 

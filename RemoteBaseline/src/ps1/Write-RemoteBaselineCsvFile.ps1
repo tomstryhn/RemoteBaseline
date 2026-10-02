@@ -2,7 +2,7 @@
 
 .DESCRIPTION Writes rows to a csv file with a UTF-8 byte order mark on both engines
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID cc601c51-3e50-46b5-ab2d-508a64c5eb00
 

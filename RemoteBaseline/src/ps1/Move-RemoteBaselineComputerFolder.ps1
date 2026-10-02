@@ -2,7 +2,7 @@
 
 .DESCRIPTION Moves a collector's computer folders under the host folders of the run
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID 35b62a6a-9ade-41fb-8524-12f18d4a5fcc
 

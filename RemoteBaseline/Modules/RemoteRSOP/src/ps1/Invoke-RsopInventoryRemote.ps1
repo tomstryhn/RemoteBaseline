@@ -2,7 +2,7 @@
 
 .DESCRIPTION Runs the worker on one or more remote computers with a single Invoke-Command call
 
-.VERSION 1.2.0
+.VERSION 1.3.0
 
 .GUID 8515ce89-9679-434c-ab9f-ffc5912fbf95
 
@@ -53,6 +53,11 @@ function Invoke-RsopInventoryRemote {
         Forwarded to Invoke-Command as UseSSL when set. Omitted entirely, not passed as
         $false, when the caller does not supply it.
 
+    .PARAMETER SkipSidReference
+        Handed to the worker as its first positional argument, always, as a bool: $false without
+        the switch, $true with it. True leaves MachineSid, DomainSid, ComputerAccountSid and
+        DomainNetbiosName null.
+
     .NOTES
         FUNCTION: Invoke-RsopInventoryRemote
         AUTHOR:   Tom Stryhn
@@ -78,7 +83,9 @@ function Invoke-RsopInventoryRemote {
         [Parameter(Mandatory = $true)]
         [scriptblock]$OnResult,
 
-        [switch]$UseSSL
+        [switch]$UseSSL,
+
+        [switch]$SkipSidReference
     )
 
     $invokeParams = @{
@@ -88,6 +95,8 @@ function Invoke-RsopInventoryRemote {
         ErrorAction   = 'SilentlyContinue'
         ErrorVariable = 'remoteErrors'
     }
+    # Always passed, with or without the switch: the worker's first parameter is SkipSidReference and the remote call is positional.
+    $invokeParams['ArgumentList'] = @([bool]$SkipSidReference)
     if ($Credential) { $invokeParams['Credential'] = $Credential }
     if ($UseSSL) { $invokeParams['UseSSL'] = $true }
 

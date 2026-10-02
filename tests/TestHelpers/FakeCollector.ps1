@@ -2,7 +2,7 @@
 
 .DESCRIPTION A fake of the five bundled collector functions: writes a run folder shaped like the real one and returns rows with the convention's columns
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID eb951ac1-be7d-4e47-852b-0e9638a1dd6f
 
@@ -45,6 +45,11 @@ Config keys, all optional:
   Warn         module names whose function writes a warning
   BlockRename  module names that get a file where the umbrella will rename the collector's run folder to
   BlockZip     true: a file is put where the umbrella's zip will go
+  WithoutSkipSidReference
+               module names whose wrapper lacks the -SkipSidReference parameter, as a collector from before output
+               convention 1.3 does; such a collector also writes no SID reference keys in system.json. Every other
+               collector accepts the switch and writes the four keys in system.json (MachineSid, DomainSid,
+               ComputerAccountSid, DomainNetbiosName, after MachineGuid): values when not skipped, null when skipped
 The fake always uses the stamp 20200101-000102 in its own folder names, so the umbrella's stamp never equals it.
 #>
 
@@ -67,6 +72,9 @@ function Invoke-FakeCollector {
     foreach ($key in @($Bound.Keys)) { $values[[string]$key] = $Bound[$key] }
     $names = @($values['ComputerName'])
     $outputPath = [string]$values['OutputPath']
+    # Whether this collector was told to leave the SID reference unread, and whether it is a pre-1.3 collector (a wrapper without the parameter).
+    $skipSid = $values.ContainsKey('SkipSidReference') -and [bool]$values['SkipSidReference']
+    $legacy = $config.ContainsKey('WithoutSkipSidReference') -and @($config.WithoutSkipSidReference) -contains $Module
     [void]$state.Calls.Add(@{
             Module        = $Module
             ComputerName  = $names
@@ -169,9 +177,32 @@ function Invoke-FakeCollector {
                     UBR = (5000 + $moduleIndex); DisplayVersion = '21H2'; EditionID = 'ServerStandard'; InstallationType = 'Server'
                     Culture = 'en-US'; TimeZoneId = 'UTC'; PSVersion = '5.1.20348.2110'; CollectedBy = 'CONTOSO\collector'
                     PartOfDomain = $true; IsElevated = $elevated; DomainRole = 3; CollectedUtc = '2020-01-01T00:01:02Z'
-                    ComputerId = $computerId; MachineGuid = ($computerId.ToLowerInvariant()); Collector = $Module; CollectorVersion = '0.0.1'; RunId = $runId
-                    Errors = $errorList; Transport = $transport; RequestedComputerName = $name; Status = $status
+                    ComputerId = $computerId; MachineGuid = ($computerId.ToLowerInvariant())
                 }
+                # The SID reference sits directly after MachineGuid, as in output convention 1.3. A collector without the switch is a pre-1.3 one and writes no such keys; one that was told to skip writes them as null.
+                if (-not $legacy) {
+                    $machineSid = $null
+                    $domainSid = $null
+                    $computerAccountSid = $null
+                    $domainNetbiosName = $null
+                    if (-not $skipSid) {
+                        $machineSid = 'S-1-5-21-{0}-{1}-{2}' -f [System.BitConverter]::ToUInt32($idBytes, 0), [System.BitConverter]::ToUInt32($idBytes, 4), [System.BitConverter]::ToUInt32($idBytes, 8)
+                        $domainSid = 'S-1-5-21-1111111111-2222222222-3333333333'
+                        $computerAccountSid = $domainSid + '-1105'
+                        $domainNetbiosName = 'CONTOSO'
+                    }
+                    $system['MachineSid'] = $machineSid
+                    $system['DomainSid'] = $domainSid
+                    $system['ComputerAccountSid'] = $computerAccountSid
+                    $system['DomainNetbiosName'] = $domainNetbiosName
+                }
+                $system['Collector'] = $Module
+                $system['CollectorVersion'] = '0.0.1'
+                $system['RunId'] = $runId
+                $system['Errors'] = $errorList
+                $system['Transport'] = $transport
+                $system['RequestedComputerName'] = $name
+                $system['Status'] = $status
                 $systemText = [pscustomobject]$system | ConvertTo-Json -Depth 4
                 if ($entry.ContainsKey('BadSystemJson') -and [bool]$entry.BadSystemJson) { $systemText = '{ this is not json' }
                 & $write (Join-Path -Path $folder -ChildPath 'system.json') $systemText $false 'computer' $folder @($name)
@@ -247,25 +278,52 @@ function Get-FakeCollectorState {
 # for real: a parameter the collectors do not have would fail the call, as it would on a real collector.
 function Invoke-FakeFirewallCollector {
     [CmdletBinding()]
-    param([string[]]$ComputerName, [string]$OutputPath, [int]$ThrottleLimit, [System.Management.Automation.PSCredential]$Credential, [switch]$UseSSL)
+    param([string[]]$ComputerName, [string]$OutputPath, [int]$ThrottleLimit, [System.Management.Automation.PSCredential]$Credential, [switch]$UseSSL, [switch]$SkipSidReference)
     Invoke-FakeCollector -Module 'RemoteFirewall' -Bound $PSBoundParameters
 }
 function Invoke-FakeRsopCollector {
     [CmdletBinding()]
-    param([string[]]$ComputerName, [string]$OutputPath, [int]$ThrottleLimit, [System.Management.Automation.PSCredential]$Credential, [switch]$UseSSL)
+    param([string[]]$ComputerName, [string]$OutputPath, [int]$ThrottleLimit, [System.Management.Automation.PSCredential]$Credential, [switch]$UseSSL, [switch]$SkipSidReference)
     Invoke-FakeCollector -Module 'RemoteRSOP' -Bound $PSBoundParameters
 }
 function Invoke-FakeScheduledTaskCollector {
     [CmdletBinding()]
-    param([string[]]$ComputerName, [string]$OutputPath, [int]$ThrottleLimit, [System.Management.Automation.PSCredential]$Credential, [switch]$UseSSL)
+    param([string[]]$ComputerName, [string]$OutputPath, [int]$ThrottleLimit, [System.Management.Automation.PSCredential]$Credential, [switch]$UseSSL, [switch]$SkipSidReference)
     Invoke-FakeCollector -Module 'RemoteScheduledTask' -Bound $PSBoundParameters
 }
 function Invoke-FakeSecEditCollector {
     [CmdletBinding()]
-    param([string[]]$ComputerName, [string]$OutputPath, [int]$ThrottleLimit, [System.Management.Automation.PSCredential]$Credential, [switch]$UseSSL)
+    param([string[]]$ComputerName, [string]$OutputPath, [int]$ThrottleLimit, [System.Management.Automation.PSCredential]$Credential, [switch]$UseSSL, [switch]$SkipSidReference)
     Invoke-FakeCollector -Module 'RemoteSecEdit' -Bound $PSBoundParameters
 }
 function Invoke-FakeServiceCollector {
+    [CmdletBinding()]
+    param([string[]]$ComputerName, [string]$OutputPath, [int]$ThrottleLimit, [System.Management.Automation.PSCredential]$Credential, [switch]$UseSSL, [switch]$SkipSidReference)
+    Invoke-FakeCollector -Module 'RemoteService' -Bound $PSBoundParameters
+}
+
+# The same five without -SkipSidReference: a bundled collector from before output convention 1.3. The resolver returns these for the modules named in Config.WithoutSkipSidReference, so a call with the switch would fail to bind.
+function Invoke-FakeLegacyFirewallCollector {
+    [CmdletBinding()]
+    param([string[]]$ComputerName, [string]$OutputPath, [int]$ThrottleLimit, [System.Management.Automation.PSCredential]$Credential, [switch]$UseSSL)
+    Invoke-FakeCollector -Module 'RemoteFirewall' -Bound $PSBoundParameters
+}
+function Invoke-FakeLegacyRsopCollector {
+    [CmdletBinding()]
+    param([string[]]$ComputerName, [string]$OutputPath, [int]$ThrottleLimit, [System.Management.Automation.PSCredential]$Credential, [switch]$UseSSL)
+    Invoke-FakeCollector -Module 'RemoteRSOP' -Bound $PSBoundParameters
+}
+function Invoke-FakeLegacyScheduledTaskCollector {
+    [CmdletBinding()]
+    param([string[]]$ComputerName, [string]$OutputPath, [int]$ThrottleLimit, [System.Management.Automation.PSCredential]$Credential, [switch]$UseSSL)
+    Invoke-FakeCollector -Module 'RemoteScheduledTask' -Bound $PSBoundParameters
+}
+function Invoke-FakeLegacySecEditCollector {
+    [CmdletBinding()]
+    param([string[]]$ComputerName, [string]$OutputPath, [int]$ThrottleLimit, [System.Management.Automation.PSCredential]$Credential, [switch]$UseSSL)
+    Invoke-FakeCollector -Module 'RemoteSecEdit' -Bound $PSBoundParameters
+}
+function Invoke-FakeLegacyServiceCollector {
     [CmdletBinding()]
     param([string[]]$ComputerName, [string]$OutputPath, [int]$ThrottleLimit, [System.Management.Automation.PSCredential]$Credential, [switch]$UseSSL)
     Invoke-FakeCollector -Module 'RemoteService' -Bound $PSBoundParameters
@@ -290,6 +348,9 @@ function Get-FakeCollectorResolution {
         RemoteSecEdit       = 'Invoke-FakeSecEditCollector'
         RemoteService       = 'Invoke-FakeServiceCollector'
     }[$Module]
+    if ($state.Config.ContainsKey('WithoutSkipSidReference') -and @($state.Config.WithoutSkipSidReference) -contains $Module) {
+        $wrapper = $wrapper.Replace('Invoke-Fake', 'Invoke-FakeLegacy')
+    }
     $version = '0.0.1'
     if ($state.Versions.ContainsKey($Module)) { $version = [string]$state.Versions[$Module] }
     return [pscustomobject]@{ Command = (Get-Command -Name $wrapper -CommandType Function); Version = $version }

@@ -2,7 +2,7 @@
 
 .DESCRIPTION Builds one RemoteService.Result row
 
-.VERSION 1.3.0
+.VERSION 1.4.0
 
 .GUID d27111d0-2676-4af6-b34e-84af76944e08
 

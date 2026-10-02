@@ -2,7 +2,7 @@
 
 .DESCRIPTION Writes host.json into a host folder
 
-.VERSION 1.0.0
+.VERSION 1.1.0
 
 .GUID a86918a1-8451-46ee-b4d5-131fe3e0b199
 
@@ -28,9 +28,11 @@ function Write-RemoteBaselineHostFile {
         Writes one object, keys in this order: ComputerName (the first requested name that maps to
         the folder), RequestedNames (string[]), ComputerId, DnsHostName, Domain, OSCaption,
         OSVersion, CurrentBuild, UBR, DisplayVersion, EditionID, InstallationType, Culture,
-        TimeZoneId, PartOfDomain, DomainRole, IsElevated, MachineGuid (all copied from SystemInfo,
-        the parsed system.json of the first present subfolder, $null when SystemInfo is $null or lacks
-        the key), Collector (RemoteBaseline), CollectorVersion, RunId (the umbrella run folder
+        TimeZoneId, PartOfDomain, DomainRole, IsElevated, MachineGuid, MachineSid, DomainSid,
+        ComputerAccountSid, DomainNetbiosName (all copied from SystemInfo, the parsed system.json of
+        the first present subfolder, $null when SystemInfo is $null or lacks the key; the last four
+        are the SID reference, which only the first selected collector reads, so they are null when
+        that collector did not reach the host), Collector (RemoteBaseline), CollectorVersion, RunId (the umbrella run folder
         name), Types (string[], selected, run order), Collectors (one object per selected type in
         run order: Type, Module, Version, Subfolder, Status, ErrorCount, RunId), Status and
         Errors (the umbrella row's, as they stand before the manifest and archive steps).
@@ -108,7 +110,7 @@ function Write-RemoteBaselineHostFile {
     $hostObject['RequestedNames'] = [string[]]@($RequestedName)
 
     # An explicit ordered list, not an enumeration of the source object, so the key order never depends on how system.json happened to be written.
-    $identityKeys = @('ComputerId', 'DnsHostName', 'Domain', 'OSCaption', 'OSVersion', 'CurrentBuild', 'UBR', 'DisplayVersion', 'EditionID', 'InstallationType', 'Culture', 'TimeZoneId', 'PartOfDomain', 'DomainRole', 'IsElevated', 'MachineGuid')
+    $identityKeys = @('ComputerId', 'DnsHostName', 'Domain', 'OSCaption', 'OSVersion', 'CurrentBuild', 'UBR', 'DisplayVersion', 'EditionID', 'InstallationType', 'Culture', 'TimeZoneId', 'PartOfDomain', 'DomainRole', 'IsElevated', 'MachineGuid', 'MachineSid', 'DomainSid', 'ComputerAccountSid', 'DomainNetbiosName')
     foreach ($key in $identityKeys) {
         $hostObject[$key] = Get-RemoteBaselineSafeProperty -InputObject $SystemInfo -Name $key -Default $null
     }

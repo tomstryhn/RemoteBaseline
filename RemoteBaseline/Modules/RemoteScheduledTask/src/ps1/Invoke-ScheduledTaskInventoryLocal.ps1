@@ -2,7 +2,7 @@
 
 .DESCRIPTION Runs the worker in-process on the local computer
 
-.VERSION 1.3.0
+.VERSION 1.4.1
 
 .GUID c0ed8c10-fe58-4237-9bc8-3d309605431e
 
@@ -27,9 +27,14 @@ function Invoke-ScheduledTaskInventoryLocal {
     .DESCRIPTION
         Kept as its own function, separate from the worker scriptblock, so tests can mock the
         local call without touching the real ScheduledTasks module or the real Task Scheduler.
-        Takes no parameters and has no logic of its own beyond the call, which is deliberate:
-        every local alias in the same Get-ScheduledTaskInventory call shares this one run instead
-        of each alias triggering its own.
+        Takes one switch, -SkipSidReference, passed to the worker by name as a real bool, and has
+        no logic of its own beyond the call, which is deliberate: every local alias in the same
+        Get-ScheduledTaskInventory call shares this one run instead of each alias triggering its
+        own.
+
+    .PARAMETER SkipSidReference
+        Passed to the worker as a bool. With the switch the worker leaves MachineSid, DomainSid,
+        ComputerAccountSid and DomainNetbiosName null and does not read them.
 
     .NOTES
         FUNCTION: Invoke-ScheduledTaskInventoryLocal
@@ -43,8 +48,10 @@ function Invoke-ScheduledTaskInventoryLocal {
         System.Management.Automation.PSObject
     #>
 
-    param()
+    param(
+        [switch]$SkipSidReference
+    )
 
     $worker = Get-ScheduledTaskInventoryWorker
-    return & $worker
+    return & $worker -SkipSidReference ([bool]$SkipSidReference)
 }

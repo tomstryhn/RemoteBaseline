@@ -2,7 +2,7 @@
 
 .DESCRIPTION Runs the worker on one or more remote computers with a single Invoke-Command call
 
-.VERSION 1.3.0
+.VERSION 1.4.0
 
 .GUID 9f3a30cc-65c0-4baf-a45b-3c68b645cdac
 
@@ -53,6 +53,11 @@ function Invoke-ServiceInventoryRemote {
         Forwarded to Invoke-Command as UseSSL when set. Omitted entirely, not passed as
         $false, when the caller does not supply it.
 
+    .PARAMETER SkipSidReference
+        Handed to the worker as its first argument, a real bool, on every call: false without the
+        switch, true with it. The worker's first parameter is -SkipSidReference, so the
+        one-element argument list binds to it. True leaves the SID reference unread.
+
     .NOTES
         FUNCTION: Invoke-ServiceInventoryRemote
         AUTHOR:   Tom Stryhn
@@ -78,7 +83,9 @@ function Invoke-ServiceInventoryRemote {
         [Parameter(Mandatory = $true)]
         [scriptblock]$OnResult,
 
-        [switch]$UseSSL
+        [switch]$UseSSL,
+
+        [switch]$SkipSidReference
     )
 
     $invokeParams = @{
@@ -90,6 +97,8 @@ function Invoke-ServiceInventoryRemote {
     }
     if ($Credential) { $invokeParams['Credential'] = $Credential }
     if ($UseSSL) { $invokeParams['UseSSL'] = $true }
+    # Always passed, with or without the switch, as a real bool: the worker's first parameter takes it positionally.
+    $invokeParams['ArgumentList'] = @([bool]$SkipSidReference)
 
     $remoteErrors = $null
     Invoke-Command @invokeParams | ForEach-Object { & $OnResult $_ }
