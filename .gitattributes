@@ -1,0 +1,6 @@
+# No line-ending conversion, on any file. The bundled collector files are recorded byte for
+# byte in RemoteBaseline/Modules/bundle.json and inside RemoteBaseline-v<version>.zip, and the
+# test suite compares those hashes with the files on disk. A checkout that rewrites line
+# endings (core.autocrlf=true, the default of Git for Windows) would change the bytes and fail
+# that comparison.
+* -text
